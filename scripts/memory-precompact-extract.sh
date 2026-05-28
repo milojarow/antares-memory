@@ -119,10 +119,10 @@ log "BEFORE_CLAUDE"
 # that the sub-claude writes via Write/Edit tools.
 trap - ERR
 set +e
-output=$(timeout --kill-after=5 300 claude -p "$sub_prompt" \
-    --model sonnet \
+output=$(timeout --kill-after=5 "$ANTARES_PRECOMPACT_TIMEOUT" claude -p "$sub_prompt" \
+    --model "$ANTARES_PRECOMPACT_MODEL" \
     --output-format json \
-    --max-budget-usd 1.00 \
+    --max-budget-usd "$ANTARES_PRECOMPACT_BUDGET" \
     --no-session-persistence \
     --permission-mode bypassPermissions \
     --append-system-prompt-file "$PROMPT_FILE" \

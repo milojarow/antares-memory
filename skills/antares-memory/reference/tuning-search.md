@@ -4,13 +4,18 @@
 
 | Knob | Default | Tunable how |
 |---|---|---|
-| Model | `paraphrase-multilingual-MiniLM-L12-v2` | env var `ANTARES_MODEL` |
-| Cosine weight | 0.7 | `--vector-weight` (CLI) or `vector_weight` (daemon JSON) |
-| BM25 weight | 0.3 | `--keyword-weight` or `keyword_weight` |
-| Min score threshold | 0.35 | `--threshold` or `threshold` |
-| Top-K | 5 | `--top-n` or `top_k` |
-| Chunk target tokens | 120 | source constant `TARGET_TOKENS` in `memory-index.py` |
-| Chunk overlap | 30 | source constant `OVERLAP_TOKENS` |
+| Embedding model | `paraphrase-multilingual-MiniLM-L12-v2` | env var `ANTARES_MODEL` (read by the daemon + indexer) |
+| Cosine weight | 0.7 | `--vector-weight` (CLI) or `vector_weight` (daemon JSON) — **CLI/daemon only**, not the hook |
+| BM25 weight | 0.3 | `--keyword-weight` or `keyword_weight` — same |
+| Min score threshold | 0.35 | `--threshold` or `threshold` — **CLI/daemon only**; hook value is hardcoded |
+| Top-K | 5 | `--top-n` or `top_k` — same |
+| Chunk target tokens | 120 | source constant `TARGET_TOKENS` in `scripts/memory-index.py` |
+| Chunk overlap | 30 | source constant `OVERLAP_TOKENS` in `scripts/memory-index.py` |
+| PreCompact extractor budget | $1.00 USD | env var `ANTARES_PRECOMPACT_BUDGET` |
+| PreCompact extractor model | `sonnet` | env var `ANTARES_PRECOMPACT_MODEL` (e.g. `haiku` for cheaper) |
+| PreCompact extractor timeout | 300s | env var `ANTARES_PRECOMPACT_TIMEOUT` |
+
+**Env vars vs hook constants** — env vars are set at the systemd unit level (for daemon) or in `~/.config/environment.d/*.conf` (for hooks). Hook constants (threshold, top-k for the auto-inject hook) live in `scripts/memory-search-hook.sh` — editing them is fine but the change is in the plugin cache and gets reverted on plugin update. For durable changes, fork the plugin or set the constant via a wrapper script in the operator's `~/.claude/settings.json`.
 
 ## When to lower the threshold
 
@@ -22,11 +27,11 @@ The `UserPromptSubmit` hook uses `0.35` by default. If you find relevant memorie
     "your test query" --threshold 0.2
 ```
 
-If the memory shows up at `0.2` but not `0.35`, your memory's content doesn't lexically/semantically match the prompt strongly enough. Options:
+If the memory shows up at `0.2` but not `0.35`, your memory's content doesn't lexically/semantically match the prompt strongly enough. Options (cheapest first):
 
-1. **Rewrite the memory's `description`** to use words the operator naturally uses when the topic comes up.
-2. **Lower the threshold globally** (requires editing the source — there's no env var for it yet). Be careful: too low = noise.
-3. **Add to `MEMORY.md`** if it should be always-loaded regardless of similarity.
+1. **Rewrite the memory's `description`** to use words the operator naturally uses when the topic comes up. Cheapest and most durable.
+2. **Lower the threshold globally** — edit `scripts/memory-search-hook.sh`, find `threshold:0.35` in the `jq` request, change to your value. Note: plugin updates overwrite this. Be careful: too low = noise. There is no env var for this yet — if you want one, file an issue.
+3. **Add to `MEMORY.md`** if it should be always-loaded regardless of similarity. See [architecture.md → MEMORY.md loading](architecture.md#how-memory-md-gets-loaded) for how this layer works.
 
 ## When to raise the threshold
 

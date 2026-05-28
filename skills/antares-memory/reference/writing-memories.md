@@ -57,6 +57,27 @@ For every memory you're about to create:
    - **Replace** only if the existing version is wrong.
 4. Never create `feedback_X.md` if `feedback_X_v2.md` or a near-synonym exists — `Edit` the original.
 
+## Creating a project scope
+
+Project scope is **opt-in**. No script creates `<project>/.claude/memory/` automatically — the operator (or you, when writing the first project-scoped memory) must create it:
+
+```bash
+mkdir -p .claude/memory
+echo '.claude/memory/' >> .gitignore       # if memories shouldn't be tracked
+echo '.claude/memory/.memory-index.db' >> .gitignore   # always — DB is a derivative
+```
+
+Once the directory exists:
+- `SessionStart` reindex picks it up the next time a session is opened with `cwd` inside the project.
+- `UserPromptSubmit` searches both scopes when `cwd` walks up to a `.claude/memory/`.
+- `PostToolUse` reindexes the project scope when a `.md` is added/edited under it.
+
+If the directory doesn't exist, the project scope is invisible to all hooks — they silently fall back to global only.
+
+**Should `.claude/memory/` be tracked?** Two answers:
+- **Solo project**: track it. The memories are part of the project's institutional knowledge.
+- **Client / shared repo**: gitignore. Memories often contain operator commentary, judgments, sensitive context you don't want shared.
+
 ## Promoting project → global
 
 If a project memory turns out to generalize (the same lesson hits in another project), promote it:

@@ -21,6 +21,12 @@ export ANTARES_STATE="${ANTARES_STATE:-$HOME/.local/state/antares-memory}"
 export ANTARES_MODEL="${ANTARES_MODEL:-paraphrase-multilingual-MiniLM-L12-v2}"
 export ANTARES_VENV_PY="$ANTARES_VENV/bin/python3"
 
+# PreCompact extractor knobs — let the operator tune cost without editing the
+# script (which lives in the plugin cache and gets overwritten on update).
+export ANTARES_PRECOMPACT_BUDGET="${ANTARES_PRECOMPACT_BUDGET:-1.00}"
+export ANTARES_PRECOMPACT_MODEL="${ANTARES_PRECOMPACT_MODEL:-sonnet}"
+export ANTARES_PRECOMPACT_TIMEOUT="${ANTARES_PRECOMPACT_TIMEOUT:-300}"
+
 # ANTARES_SCRIPTS_DIR is the directory holding the .sh / .py scripts. The
 # library lives at <scripts>/lib/common.sh, so walk one level up.
 _lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

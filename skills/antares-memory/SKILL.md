@@ -77,7 +77,7 @@ Every hook is failsafe: if the daemon is down, the venv isn't ready, or any step
 
 **Force a search** — `bash "${CLAUDE_PLUGIN_ROOT}/scripts/memory-search.sh" "your query"` (or invoke `memory-search.py` directly with the venv python).
 
-**Tune the search** — env vars at install time or for one-off invocations: `ANTARES_MODEL`, `--threshold`, `--vector-weight`, `--keyword-weight`. See [reference/tuning-search.md](reference/tuning-search.md).
+**Tune the search** — env vars: `ANTARES_MODEL` (embedding model), `ANTARES_PRECOMPACT_BUDGET` (USD cap for the extractor), `ANTARES_PRECOMPACT_MODEL` (`sonnet` default, drop to `haiku` for cheaper). CLI/daemon flags for one-off queries: `--threshold`, `--vector-weight`, `--keyword-weight`. The hook's default threshold (0.35) is a constant in `memory-search-hook.sh` — edit the script to change it globally. See [reference/tuning-search.md](reference/tuning-search.md).
 
 **Debug** — `/antares-memory:status` first. Then check `$ANTARES_STATE/logs/`. See [reference/troubleshooting.md](reference/troubleshooting.md).
 

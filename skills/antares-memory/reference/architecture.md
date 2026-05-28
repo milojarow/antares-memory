@@ -23,6 +23,23 @@ $CLAUDE_MEMORY_HOME/            ← default ~/.claude/memory/
 
 Files are POSIX `.md` files. The DB is a derivative — losing it is harmless (`memory-index.py` rebuilds from scratch).
 
+### How `MEMORY.md` gets loaded
+
+`MEMORY.md` is the always-on layer. It's NOT injected by any hook — instead, it relies on Claude Code's CLAUDE.md `@`-import mechanism. The operator adds one line to their `~/.claude/CLAUDE.md`:
+
+```
+@~/.claude/memory/MEMORY.md
+```
+
+Claude Code loads `~/.claude/CLAUDE.md` automatically into every session's system prompt, and `@`-imports cascade — so `MEMORY.md` content lands in the system prompt before any hook fires.
+
+The other `.md` files in the directory are NOT loaded this way. They're indexed and pulled in only on semantic match by the `UserPromptSubmit` hook (the `<auto-loaded-memory>` block). Difference matters:
+
+- `MEMORY.md` → always loaded (paid for every prompt, regardless of relevance)
+- All other memory files → loaded only when their content semantically matches the current prompt
+
+Keep `MEMORY.md` short — it's overhead per prompt. Use it for directives you want enforced unconditionally; let semantic recall handle the rest.
+
 ## 2. Indexer
 
 `scripts/memory-index.py` — runs in three triggers:
