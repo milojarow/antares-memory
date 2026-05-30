@@ -154,25 +154,31 @@ If the daemon is down or returns no hits, emits `{}` — no context injected, us
 
 The journal lives in the HOME slug only — one journal store regardless of cwd. (`MEMORY.md` is per slug; the journal is global.)
 
-## 5. Auto-extract
+## 5. Auto-capture — the chronicle pipeline
 
-`scripts/memory-precompact-extract.sh` is the most expensive layer — runs when Claude Code is about to compact the conversation.
+`scripts/memory-chronicle-launch.sh` runs on BOTH `PreCompact` and `SessionEnd`
+(fire-and-forget) so a session is captured even when it never compacts. It is a
+two-stage pipeline over the NEW transcript segment:
 
-1. Extract text-only transcript from the JSONL (capped at last 100 KB) to a temp file.
-2. Resolve HOME slug dir + CURRENT slug dir (computed from parent session's cwd).
-3. Build a contextualized prompt for the sub-Claude (telling it the two paths, the decision rule HOME vs CURRENT).
-4. Spawn `claude -p` headless:
-   - `--model "$ANTARES_PRECOMPACT_MODEL"` (default `sonnet`)
-   - `--max-budget-usd "$ANTARES_PRECOMPACT_BUDGET"` (default `1.00`)
-   - `--no-session-persistence` (transient)
-   - `--permission-mode bypassPermissions` (sub-claude can write freely under the memory dirs)
-   - `--append-system-prompt-file memory-precompact-prompt.txt` (the taxonomy + decision rules)
-5. Sub-Claude writes new memories via `Write`/`Edit`.
-6. Parent script reindexes synchronously so the new memories are searchable in the next session.
+```
+transcript ──[cronista]──▶ journal ──[destilador]──▶ memories
+```
 
-A single-flight lock at `$XDG_RUNTIME_DIR/antares-memory-precompact.lock` prevents concurrent extractors.
+1. A per-session **watermark** (lines of the `.jsonl` already processed) selects the NEW
+   segment (delta). A first-seen in-flight session caps the delta at the last ~100 KB so
+   the lobo doesn't choke on a multi-MB backlog.
+2. Preprocess the delta to user/assistant text (jq, tool calls stripped).
+3. **cronista** (`agents-sdk/cronista.mjs`, isolated SDK) appends the episodic chronicle
+   of the delta to `journal/session-<id>.md`; then the watermark advances.
+4. **destilador** (`agents-sdk/destiller.mjs`, isolated SDK), chained on the SAME delta,
+   distills durable memories — dedup against an inline memories digest (no base sweep).
+5. Reindex synchronously so the new journal + memories are searchable next session.
 
-The `CLAUDE_HEADLESS=1` env var is exported before the `claude -p` call. All hooks check this and short-circuit (`echo '{}'; exit 0`) when set — prevents recursive memory search inside the extractor sub-process.
+One watermark → no double-capture between journal and memories. A per-session lock
+prevents concurrent runs. `CLAUDE_HEADLESS=1` is exported before each lobo (all hooks
+short-circuit when set — the fork-bomb guard). Both run with `settingSources: []` (no
+persona bias) and a capped `maxTurns`. Knobs: `ANTARES_CRONISTA_*` / `ANTARES_DISTILLER_*`
+(model / effort / timeout).
 
 ## Cross-process coordination
 

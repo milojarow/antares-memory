@@ -121,11 +121,11 @@ Common log lines:
 - `TIMEOUT` — sub-claude took > `ANTARES_PRECOMPACT_TIMEOUT` seconds (default 300). Rare; check `cat $XDG_RUNTIME_DIR/antares-memory-precompact-prepared.md | head -50` to see the prepared transcript size.
 - `OK turns=N cost=$X` — sub-claude finished, may have written nothing if it judged nothing was worth saving. Look at the `RESULT:` line to see the extraction summary.
 
-To force-trigger a manual extraction (testing):
+To force-trigger a manual capture (testing):
 
 ```bash
-echo '{"transcript_path":"/path/to/some.jsonl","session_id":"test","trigger":"manual","cwd":"'"$PWD"'"}' \
-  | bash "${CLAUDE_PLUGIN_ROOT}/scripts/memory-precompact-extract.sh"
+echo '{"transcript_path":"/path/to/some.jsonl","session_id":"test","hook_event_name":"SessionEnd","cwd":"'"$PWD"'"}' \
+  | bash "${CLAUDE_PLUGIN_ROOT}/scripts/memory-chronicle-launch.sh"
 ```
 
 ## Cost-tuning the PreCompact extractor

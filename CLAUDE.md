@@ -42,7 +42,7 @@ Documents the memory system: frontmatter taxonomy (`feedback_*` / `reference_*` 
 2. **Indexer** — `memory-index.py`: paragraph-aware chunking (120 tokens, overlap 30) + sentence-transformers embeddings + SQLite FTS5, per slug
 3. **Search** — `memory-search.py` + `memory-search-daemon.py`: hybrid cosine (70%) + BM25 (30%), threshold 0.35, UNIX socket; queries the HOME and CURRENT slug DBs
 4. **Auto-inject** — `memory-search-hook.sh` on UserPromptSubmit; `memory-journal-init.sh` on SessionStart (journal lives in HOME slug)
-5. **Auto-extract** — `memory-precompact-extract.sh` spawns `claude -p` headless with `memory-precompact-prompt.txt` on PreCompact, writes to HOME or CURRENT per the lesson
+5. **Auto-capture** — `memory-chronicle-launch.sh` on PreCompact + SessionEnd runs the chronicle pipeline (cronista → journal, destilador → memories) as isolated Agent SDK lobos, writing to HOME or CURRENT per the lesson
 
 ## Persistence layout (after install)
 

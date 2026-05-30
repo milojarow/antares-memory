@@ -34,7 +34,7 @@ Five layers, each documented in `reference/`:
 2. **Indexer** — chunked embeddings (paragraph-aware, ~120 tokens, overlap 30) + FTS5, stored in `<slug>/memory/.memory-index.db`
 3. **Search** — hybrid cosine (70%) + BM25 (30%), threshold 0.35; daemon keeps the model in RAM
 4. **Auto-inject** — UserPromptSubmit hook queries the daemon, embeds top-5 hits as an `<auto-loaded-memory>` block
-5. **Auto-extract** — PreCompact hook runs an isolated Agent SDK subagent (the **extractor lobo**) to distill memories before compaction. Four more lobos handle routing, recall, and base/index maintenance — see [reference/lobos-agents-sdk.md](reference/lobos-agents-sdk.md)
+5. **Auto-capture** — `PreCompact` + `SessionEnd` run the **chronicle pipeline** (`cronista` → `destilador`, isolated SDK): the cronista appends the session's episodic journal, the destilador distills durable memories from the same delta. Routing, recall, and base/index maintenance are separate lobos — see [reference/lobos-agents-sdk.md](reference/lobos-agents-sdk.md)
 
 ## When to use
 
@@ -76,9 +76,9 @@ UserPromptSubmit ──► search daemon ──► inject top-5 hits as <auto-lo
                                        ▼
 Write/Edit a .md ──► PostToolUse async reindex (of the affected slug)
                                        ▼
-PreCompact ──► extractor lobo (isolated SDK) ──► extracts new memories ──► reindex
+PreCompact ──► chronicle: cronista (journal) → destilador (memories) ──► reindex
                                        ▼
-SessionEnd ──► gardener lobo (≥24h) + index-curator lobo (≥7d) — fire-and-forget
+SessionEnd ──► chronicle (same) + gardener (≥24h) + index-curator (≥7d) — fire-and-forget
 ```
 
 Plus the always-on layer: Claude Code itself loads `MEMORY.md` of the cwd's slug at session start.
