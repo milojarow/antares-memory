@@ -23,8 +23,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/memory-precompact-extract.sh\"",
-            "timeout": 380
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/memory-chronicle-launch.sh\"",
+            "timeout": 30
           }
         ]
       }
@@ -32,6 +32,11 @@
     "SessionEnd": [
       {
         "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/memory-chronicle-launch.sh\"",
+            "timeout": 30
+          },
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/memory-gardener-launch.sh\"",

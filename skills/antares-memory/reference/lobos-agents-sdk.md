@@ -1,4 +1,4 @@
-# The internal pack — antares' 5 lobos (Agent SDK)
+# The internal pack — antares' 6 lobos (Agent SDK)
 
 Antares' judgment points run as **isolated subagents** ("lobos"), not as a bare
 `claude -p`. The old `claude -p` extractor loaded your `CLAUDE.md` + persona files
@@ -6,8 +6,16 @@ into every run → extraction biased by the operator's voice and inflated token 
 The lobos run with `settingSources: []`, so they see **only** the task you hand
 them — no CLAUDE.md, no persona, no auto-memory.
 
-Three lobos run headless through the Claude Agent SDK (extractor, gardener, curator);
-two (router, recall) are filesystem subagents the parent dispatches in-session.
+Four lobos run headless through the Claude Agent SDK (cronista, destilador, gardener,
+curator); two (router, recall) are filesystem subagents the parent dispatches in-session.
+
+Capture is a pipeline: `transcript ──[cronista]──▶ journal ──[destilador]──▶ memories`.
+The cronista reads only the NEW transcript segment (a per-session watermark) and appends
+the episodic journal; the destilador then distills durable memories from that same delta.
+One watermark → no double-capture between journal and memories. Both run on PreCompact
+(compaction = partial close) AND SessionEnd, chained in one fire-and-forget launcher, so
+the session is captured even when it never compacts. They replace the old single extractor
+that only ran on PreCompact (sessions that closed without compacting were lost).
 
 ## Prerequisite — bring the SDK (one command)
 
@@ -35,7 +43,8 @@ Verify: `node -e "import('@anthropic-ai/claude-agent-sdk').then(()=>console.log(
 
 | Lobo | Runtime | Trigger | Access | Job |
 |---|---|---|---|---|
-| **extractor** | SDK headless | PreCompact | reads the dying transcript | distill what mattered into memories — isolated, no persona bias (replaces the old `claude -p`) |
+| **cronista** | SDK headless | PreCompact + SessionEnd (bg) | reads the NEW transcript segment (per-session watermark) | appends the episodic **journal** of the session (`journal/session-<id>.md`); produces the δ |
+| **destilador** | SDK headless | chained after the cronista (same launcher) | reads the δ + an inline memories digest | distills durable **memories** from the δ, dedup vs the digest — replaces the old extractor / `claude -p` |
 | **router** | filesystem agent | dispatched on "save this" / "guarda esto" | reads + writes memories | pick scope (home / project / both / persona) and **dedup semantically** before writing |
 | **recall** | filesystem agent | parent dispatches on history questions ("¿ya tratamos X?", "¿qué decidimos?") | read-only (Read/Grep/Glob) | episodic recall — synthesizes what happened / when / decided from memories + journals (on-demand, not the hot path) |
 | **gardener** | SDK headless (**opus**) | SessionEnd, gate ≥24h | digest-triage → merges survivors (Edit) → lists redundant files; launcher backs up + deletes | periodic base hygiene: **acts** — consolidates near-dups, removes obsolete (folds unique content into the survivor first); leaves no notes to review |
