@@ -26,9 +26,11 @@ Cross-cutting lesson (applies across cwds) → HOME slug. cwd-specific → CURRE
 
 # Hard rules
 - Filename prefix MUST match the frontmatter `type` (feedback_/reference_/project_/tool_/user_).
-- Every file gets frontmatter: `name`, `description`, `metadata.type`.
+- Every file gets frontmatter: `name`, `description`, and `metadata` with `type` AND
+  `originSessionId` set to the **REAL session id given in the prompt** — never your own
+  sub-process id, never one you infer. Use exactly the id the prompt provides.
 - CONSERVATIVE: a delta may yield ZERO durable memories. That is a perfectly good result — do NOT manufacture memories to look productive.
 - You NEVER touch `MEMORY.md` (the curator owns it) or the journal files (the cronista owns them).
 
 # Output
-Print ONE line: `distilled: +N new, M enriched, K skipped-as-dup` (or `nothing durable this delta`). Then EXIT. No questions.
+Print ONE line with the ACTUAL integer counts — e.g. `distilled: 3 new, 1 enriched` (or `nothing durable this delta`). Use real numbers, never placeholder letters like N/M/K. Then EXIT. No questions.

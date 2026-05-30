@@ -138,6 +138,7 @@ else
 fi
 destilador_task="Distill durable memories from the NEW session activity.
 
+REAL SESSION ID (use verbatim for each memory's metadata.originSessionId): $session_id
 DELTA (new transcript segment, text only): $delta
 $mem_block
 
