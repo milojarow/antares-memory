@@ -1,13 +1,13 @@
 ---
 name: antares-memory
-description: Persistent semantic + keyword memory system for Claude Code. Use when writing or editing memory files (`feedback_*`, `reference_*`, `project_*`, `user_*`, `tool_*`); when deciding HOME vs CURRENT slug for a memory; when the user says "save this", "memorize", "remember", "recall", "guarda esto", "olvida esto"; when reading or editing memory files under `~/.claude/projects/<slug>/memory/`, `MEMORY.md`, or `journal/*.md`; when tuning embeddings, sentence-transformers, BM25 hybrid search, threshold/weights, or the search daemon; when running `/antares-memory:install|status|migrate|uninstall`; when troubleshooting the daemon, FTS5, the precompact extractor, the `<auto-loaded-memory>` block not appearing, or model issues; when diagnosing why a remembered fact isn't being recalled; when handling the PreCompact extraction (isolated Agent SDK subagents — "lobos"); when designing the frontmatter taxonomy or dedup discipline.
+description: Persistent semantic + keyword memory system for Claude Code. Use when writing or editing memory files (`feedback_*`, `reference_*`, `project_*`, `user_*`, `tool_*`); when deciding HOME vs CURRENT slug for a memory; when the user says "save this", "memorize", "remember", "recall", "guarda esto", "olvida esto"; when reading or editing memory files under `~/.claude/projects/<slug>/memory/`, `MEMORY.md`, or `journal/*.md`; when tuning embeddings, sentence-transformers, BM25 hybrid search, threshold/weights, or the search daemon; when running `/antares-memory:install|status|migrate|uninstall`; when troubleshooting the daemon, FTS5, the capture lobos (cronista / destilador), the `<auto-loaded-memory>` block not appearing, or model issues; when diagnosing why a remembered fact isn't being recalled; when handling the PreCompact extraction (isolated Agent SDK subagents — "lobos"); when designing the frontmatter taxonomy or dedup discipline.
 ---
 
 # antares-memory
 
 > **💭 ACTIVE-SKILL MARKER:** Prefija tu reply con 💭 **solo en turnos donde el trabajo toca el dominio de `antares-memory`** — sistema antares de memoria — embeddings, BM25 hybrid search, auto-extract on PreCompact, journal, daemon, hooks. La **capa/proyecto da igual** (frontend, backend, n8n, script local — todos valen): lo que importa es si *este turno* toca el dominio. En turnos que NO lo tocan (typecheck, build, deploy, git ops, edición o curl de otros dominios), **omite 💭** aunque la skill se haya cargado antes en la sesión. Si otras skills activas también aplican al mismo turno, **apila sus emojis** en el prefijo.
 
-A turnkey persistent memory system for Claude Code: cross-session knowledge written to flat `.md` files, indexed with embeddings + BM25, auto-injected on `UserPromptSubmit`, and auto-extracted on `PreCompact` before context is lost.
+A turnkey persistent memory system for Claude Code: cross-session knowledge written to flat `.md` files, indexed with embeddings + BM25, auto-injected on `UserPromptSubmit`, and auto-captured on `PreCompact` + `SessionEnd` before context is lost.
 
 ## Storage model — native Claude Code slug convention
 
@@ -100,7 +100,7 @@ Every hook is failsafe: if the daemon is down, the venv isn't ready, or any step
 
 **Force a search** — invoke `memory-search.py` directly with the venv python (full output, all flags).
 
-**Tune the search** — env vars: `ANTARES_MODEL`, `ANTARES_PRECOMPACT_BUDGET`, `ANTARES_PRECOMPACT_MODEL`, `ANTARES_PRECOMPACT_TIMEOUT`. CLI/daemon flags for one-off queries: `--threshold`, `--vector-weight`, `--keyword-weight`. The hook's default threshold (0.35) is hardcoded in `memory-search-hook.sh` — edit the script to change it globally (plugin updates overwrite). See [reference/tuning-search.md](reference/tuning-search.md).
+**Tune the search** — CLI/daemon flags for one-off queries: `--threshold`, `--vector-weight`, `--keyword-weight`. The hook's default threshold (0.35) is hardcoded in `memory-search-hook.sh` — edit the script to change it globally (plugin updates overwrite). **Tune the capture/maintenance lobos** separately via `ANTARES_<LOBO>_MODEL` / `_EFFORT` / `_TIMEOUT` (cronista · destilador · gardener · curator). See [reference/tuning-search.md](reference/tuning-search.md).
 
 **Debug** — `/antares-memory:status` first. Then check `$ANTARES_STATE/logs/` (default `~/.local/state/antares-memory/logs/`). See [reference/troubleshooting.md](reference/troubleshooting.md).
 
@@ -118,5 +118,5 @@ Every hook is failsafe: if the daemon is down, the venv isn't ready, or any step
 - [reference/frontmatter-taxonomy.md](reference/frontmatter-taxonomy.md) — the 5 types, fields, examples
 - [reference/writing-memories.md](reference/writing-memories.md) — decision rules, dedup discipline, when to enrich vs create
 - [reference/tuning-search.md](reference/tuning-search.md) — threshold, weights, top-k, model swap, chunk size
-- [reference/troubleshooting.md](reference/troubleshooting.md) — daemon, FTS5, indexer, hooks, extractor
+- [reference/troubleshooting.md](reference/troubleshooting.md) — daemon, FTS5, indexer, hooks, capture lobos
 - [reference/lobos-agents-sdk.md](reference/lobos-agents-sdk.md) — the 5 lobos (Agent SDK subagents): SDK install, isolation, triggers, scaling (digest-in-bash), fork-bomb defenses

@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // antares "index-curator" lobo — headless, ISOLATED (settingSources: []).
-// PROPOSES MEMORY.md index promotions/demotions (memories that became recurrent/
-// critical → always-on; stale entries → out) but NEVER edits MEMORY.md. Writes
-// proposals to <HOME>/.index-suggestions.md for the operator to apply by hand.
-// Policy: memory-curator-prompt.txt. Reads its task prompt (dirs + MEMORY.md +
-// optional search log) from stdin. Prints a CLI-compatible JSON envelope.
+// OWNS MEMORY.md: decides + APPLIES index promotions/demotions directly (the operator
+// delegated index curation — no hand-tending). opus/high. The launcher backs up
+// MEMORY.md before each run; the lobo keeps a persistent operator-preferences memory
+// and writes a changelog. Conservative on removal (adding is cheap; removing an
+// always-on directive can lose something). Policy: memory-curator-prompt.txt. Reads
+// its task (digest + prefs + paths) from stdin. Prints a CLI-compatible JSON envelope.
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

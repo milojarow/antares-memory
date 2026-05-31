@@ -61,7 +61,7 @@ the gardener at rc=124 / 300s). So both maintenance launchers (gardener and cura
 pre-digest: bash builds `filename: description` (frontmatter only) for every memory and
 passes it **inline** in the task prompt. The lobo triages from text in a few turns and
 reads only the handful of files a real candidate needs — no base sweep. Same split as
-the extractor: the agent judges, the shell does the IO. When you add a maintenance lobo
+the old extractor: the agent judges, the shell does the IO. When you add a maintenance lobo
 over the whole base, digest first; don't make the model read 150 files.
 
 The curator additionally **owns** `MEMORY.md`: the operator delegated index curation, so
@@ -82,11 +82,11 @@ lose an important memory — when unsure, KEEP.
 
 ## Knobs (env vars — no script edits, survive plugin updates)
 
-`ANTARES_PRECOMPACT_MODEL` / `_TIMEOUT` (extractor) · `ANTARES_GARDENER_MODEL` /
-`_EFFORT` / `_TIMEOUT` · `ANTARES_CURATOR_MODEL` / `_EFFORT` / `_TIMEOUT` ·
-`ANTARES_RECALL_MODEL` / `_EFFORT`. Defaults: model `sonnet`, effort `medium` — except
-the **curator**, which defaults to **opus / high** (it owns the index; the operator wants
-its best judgment on what stays always-on).
+Per SDK lobo, `_MODEL` / `_EFFORT` / `_TIMEOUT`: `ANTARES_CRONISTA_*` · `ANTARES_DISTILLER_*`
+· `ANTARES_GARDENER_*` · `ANTARES_CURATOR_*`. Defaults: cronista & destilador `sonnet` /
+`medium`; **gardener & curator `opus` / `high`** (they make irreversible calls — deleting
+files, editing the always-on index). The two filesystem agents (router, recall) take their
+model from their `.md` frontmatter, not env vars.
 
 ## The one rule when adding a lobo
 

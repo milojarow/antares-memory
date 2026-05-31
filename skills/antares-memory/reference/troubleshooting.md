@@ -107,19 +107,23 @@ If FAIL: install a SQLite build with FTS5. On Arch/Debian/Ubuntu, the default ha
 
 The daemon will gracefully degrade to **vector-only search** (no BM25) if FTS5 is unavailable — but you lose keyword precision.
 
-## PreCompact extractor didn't write any memories
+## The capture pipeline didn't write any memories
 
 ```bash
-tail -n 50 "$ANTARES_STATE/logs/memory-precompact.log"
+tail -n 50 "$ANTARES_STATE/logs/memory-chronicle.log"
 ```
 
-Common log lines:
+Common log lines (emitted by `memory-chronicle-launch.sh`):
 
-- `SKIP no transcript_path` — Claude Code didn't supply a transcript file. Nothing to extract.
-- `SKIP venv not ready` — `/antares-memory:install` wasn't run yet.
-- `BUDGET_EXCEEDED` — sub-claude hit the `--max-budget-usd` cap (default $1.00). Partial writes (if any) before the cap are kept. Raise the cap via `ANTARES_PRECOMPACT_BUDGET` env var.
-- `TIMEOUT` — sub-claude took > `ANTARES_PRECOMPACT_TIMEOUT` seconds (default 300). Rare; check `cat $XDG_RUNTIME_DIR/antares-memory-precompact-prepared.md | head -50` to see the prepared transcript size.
-- `OK turns=N cost=$X` — sub-claude finished, may have written nothing if it judged nothing was worth saving. Look at the `RESULT:` line to see the extraction summary.
+- `INVOKED event=… reason=… session=…` — the launcher fired (PreCompact or SessionEnd).
+- `SKIP no transcript` / `SKIP no session_id` — Claude Code didn't supply a transcript or session id; nothing to capture.
+- `SKIP reason=resume` — a resumed session is skipped so the same delta isn't re-captured.
+- `SKIP nothing new (total=… <= wm=…)` — no transcript lines since the last watermark.
+- `SKIP delta trivial (…B)` — the delta is below the size gate; the watermark advances but no lobos spawn (cheap sessions cost nothing).
+- `SKIP lock held` — a previous chronicle run for this session is still in flight.
+- `LAUNCH chronicle pipeline (background)` — gates passed; cronista + destilador dispatched.
+- `CRONISTA rc=… result=…` / `DESTILADOR rc=… result=…` — each lobo's exit. `rc=0` = success; nonzero carries the envelope subtype (`error_max_turns`, or `error_exception` which is usually a transient socket — retried on the next run).
+- `watermark advanced -> N` — the session watermark moved forward so the next run only sees newer lines.
 
 To force-trigger a manual capture (testing):
 
@@ -128,17 +132,19 @@ echo '{"transcript_path":"/path/to/some.jsonl","session_id":"test","hook_event_n
   | bash "${CLAUDE_PLUGIN_ROOT}/scripts/memory-chronicle-launch.sh"
 ```
 
-## Cost-tuning the PreCompact extractor
+## Cost-tuning the capture lobos
 
-Set env vars (e.g. in `~/.config/environment.d/antares-memory.conf`):
+The capture pipeline (cronista → destilador) and the maintenance lobos (gardener, curator) each read per-lobo env vars — no source edits (the scripts live in plugin cache and get overwritten on update). Set them e.g. in `~/.config/environment.d/antares-memory.conf`:
 
 ```
-ANTARES_PRECOMPACT_BUDGET=0.30
-ANTARES_PRECOMPACT_MODEL=haiku
-ANTARES_PRECOMPACT_TIMEOUT=180
+# cheaper capture: smaller model + shorter timeout
+ANTARES_CRONISTA_MODEL=haiku
+ANTARES_DISTILLER_MODEL=haiku
+ANTARES_CRONISTA_TIMEOUT=240
+ANTARES_DISTILLER_TIMEOUT=300
 ```
 
-These don't require editing the script (which lives in plugin cache and gets overwritten on update). They're consumed at extractor-spawn time.
+Each lobo honors `ANTARES_<LOBO>_MODEL` / `_EFFORT` / `_TIMEOUT` (`CRONISTA`, `DISTILLER`, `GARDENER`, `CURATOR`). There's no dollar budget cap — the lobos are time-bounded, not cost-bounded.
 
 ## Index corrupted / wrong embeddings
 

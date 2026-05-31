@@ -188,12 +188,12 @@ persona bias) and a capped `maxTurns`. Knobs: `ANTARES_CRONISTA_*` / `ANTARES_DI
 | Two PostToolUse reindexes racing | The indexer is idempotent — only re-embeds files with mtime > stored. Last write wins on the chunks table (DELETE + INSERT per file). |
 | Daemon lock during reindex | Daemon opens DB read-only — no lock contention. |
 | Re-entry from headless sub-claude | `CLAUDE_HEADLESS=1` is set; every hook checks it and exits silently. |
-| Concurrent PreCompact extractors | `flock`-style noclobber lock file in `$XDG_RUNTIME_DIR`. |
+| Concurrent chronicle runs (a PreCompact + SessionEnd near-collision) | per-session `noclobber` lock file; a run skips if one for that session is already in flight. |
 
 ## Failure modes (designed)
 
 - Daemon down → hook emits `{}`, prompt continues with no auto-loaded memory.
 - Venv missing → reindex hooks emit `{}` and skip.
-- Sub-claude budget exceeded → log says `BUDGET_EXCEEDED`, partial writes (if any) are kept, reindex still runs.
+- A capture lobo times out / errors → log says `CRONISTA rc=…` or `DESTILADOR rc=…` (nonzero); partial writes are kept, and the watermark only advances on cronista success, so the delta is retried next run.
 - SQLite locked (very rare) → search returns empty hits, log line, no user-visible failure.
-- Transcript file missing → log says `SKIP no transcript_path`, exit 0.
+- Transcript file missing → log says `SKIP no transcript`, exit 0.

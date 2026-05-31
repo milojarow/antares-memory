@@ -21,7 +21,7 @@ type: <feedback|reference|project|user|tool>
 | `type` | yes | One of the 5 taxonomy values. Determines the filename prefix. |
 
 Optional fields you may see in the wild:
-- `originSessionId` — UUID of the session that produced the memory (added by the PreCompact extractor)
+- `originSessionId` — UUID of the session that produced the memory (added by the destilador)
 
 ## The 5 types
 

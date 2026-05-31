@@ -4,8 +4,8 @@
 #
 # Failsafe: ANY error → echo '{}' and exit 0, never block the user's prompt.
 
-# Re-entrancy guard: if a parent set CLAUDE_HEADLESS (e.g. PreCompact extractor
-# spawning `claude -p`), the sub-claude must NOT recursively trigger memory
+# Re-entrancy guard: if a parent set CLAUDE_HEADLESS (e.g. a capture lobo
+# spawning a headless sub-claude), the sub-claude must NOT recursively trigger memory
 # search. Exit silently with empty hook output.
 [[ -n "${CLAUDE_HEADLESS:-}" ]] && { echo '{}'; exit 0; }
 

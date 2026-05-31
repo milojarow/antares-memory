@@ -19,18 +19,13 @@
 #                          (default ~/.local/state/antares-memory)
 #   ANTARES_MODEL       — sentence-transformers model name
 #                          (default paraphrase-multilingual-MiniLM-L12-v2)
-#   ANTARES_PRECOMPACT_BUDGET / _MODEL / _TIMEOUT — extractor knobs
+#   (per-lobo knobs ANTARES_CRONISTA_*/DISTILLER_*/GARDENER_*/CURATOR_* are read
+#    directly by each lobo's .mjs/launcher with inline defaults — not exported here.)
 
 export ANTARES_VENV="${ANTARES_VENV:-$HOME/.local/share/antares-memory/venv}"
 export ANTARES_STATE="${ANTARES_STATE:-$HOME/.local/state/antares-memory}"
 export ANTARES_MODEL="${ANTARES_MODEL:-paraphrase-multilingual-MiniLM-L12-v2}"
 export ANTARES_VENV_PY="$ANTARES_VENV/bin/python3"
-
-# PreCompact extractor knobs — let the operator tune cost without editing the
-# script (which lives in the plugin cache and gets overwritten on update).
-export ANTARES_PRECOMPACT_BUDGET="${ANTARES_PRECOMPACT_BUDGET:-1.00}"
-export ANTARES_PRECOMPACT_MODEL="${ANTARES_PRECOMPACT_MODEL:-sonnet}"
-export ANTARES_PRECOMPACT_TIMEOUT="${ANTARES_PRECOMPACT_TIMEOUT:-300}"
 
 # Root of all slug-based memory dirs.
 export ANTARES_PROJECTS_DIR="$HOME/.claude/projects"

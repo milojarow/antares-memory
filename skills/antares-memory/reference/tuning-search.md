@@ -11,9 +11,10 @@
 | Top-K | 5 | `--top-n` or `top_k` — same |
 | Chunk target tokens | 120 | source constant `TARGET_TOKENS` in `scripts/memory-index.py` |
 | Chunk overlap | 30 | source constant `OVERLAP_TOKENS` in `scripts/memory-index.py` |
-| PreCompact extractor budget | $1.00 USD | env var `ANTARES_PRECOMPACT_BUDGET` |
-| PreCompact extractor model | `sonnet` | env var `ANTARES_PRECOMPACT_MODEL` (e.g. `haiku` for cheaper) |
-| PreCompact extractor timeout | 300s | env var `ANTARES_PRECOMPACT_TIMEOUT` |
+| Cronista model / effort / timeout | `sonnet` / `medium` / 420s | `ANTARES_CRONISTA_MODEL` · `_EFFORT` · `_TIMEOUT` |
+| Destilador model / effort / timeout | `sonnet` / `medium` / 480s | `ANTARES_DISTILLER_MODEL` · `_EFFORT` · `_TIMEOUT` |
+| Gardener model / effort / timeout | `opus` / `high` / 420s | `ANTARES_GARDENER_MODEL` · `_EFFORT` · `_TIMEOUT` |
+| Curator model / effort / timeout | `opus` / `high` / 420s | `ANTARES_CURATOR_MODEL` · `_EFFORT` · `_TIMEOUT` |
 
 **Env vars vs hook constants** — env vars are set at the systemd unit level (for daemon) or in `~/.config/environment.d/*.conf` (for hooks). Hook constants (threshold, top-k for the auto-inject hook) live in `scripts/memory-search-hook.sh` — editing them is fine but the change is in the plugin cache and gets reverted on plugin update. For durable changes, fork the plugin or set the constant via a wrapper script in the operator's `~/.claude/settings.json`.
 

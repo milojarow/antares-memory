@@ -19,7 +19,7 @@ Everything ships in one plugin. After `/antares-memory:install`, you get:
 
 - **Cross-session knowledge has to be re-derived every conversation otherwise.** A flat `CLAUDE.md` doesn't scale past a few dozen rules.
 - **Semantic recall beats keyword grep.** Hybrid search (70% cosine + 30% BM25) finds memories you didn't know to look for.
-- **PreCompact is the only moment the transcript is still in memory.** A headless extractor at that point captures lessons that would otherwise be lost when context compresses.
+- **Sessions are captured before the transcript is lost.** A headless pipeline (cronista → destilador) runs on PreCompact *and* SessionEnd — on compaction it grabs the segment still in memory; on close it captures whatever the session never compacted.
 - **Daemon keeps the model warm.** First search after install is slow (model load); subsequent searches are sub-100ms.
 - **Slug-based storage mirrors Claude Code's native convention.** `MEMORY.md` auto-loads without any `@`-import — fully transparent for the operator.
 

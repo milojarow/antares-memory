@@ -87,20 +87,19 @@
 - Drops chunks for only one slug.
 - Doesn't mention the language mismatch.
 
-## Scenario 5 — PreCompact extractor is expensive
+## Scenario 5 — the capture pipeline is expensive
 
 **Prompt:**
-> "Cada vez que mi sesión se compacta, veo en los logs que la extracción me cuesta como $0.40. ¿Cómo lo reduzco o lo apago si quiero?"
+> "Cada vez que mi sesión se compacta o termina, veo en los logs que la captura me cuesta. ¿Cómo lo reduzco o lo apago si quiero?"
 
 **Expected:**
 
-Options laid out using **env vars** (no source edits needed — the script reads them):
+Options laid out using **env vars** (no source edits needed — the lobos read them at spawn time):
 
-1. Lower budget: `ANTARES_PRECOMPACT_BUDGET=0.20` in `~/.config/environment.d/antares-memory.conf` or similar.
-2. Cheaper model: `ANTARES_PRECOMPACT_MODEL=haiku`.
-3. Shorter timeout: `ANTARES_PRECOMPACT_TIMEOUT=120`.
-4. **Disable entirely** — fork the plugin OR override the `PreCompact` hook in `~/.claude/settings.json` with an empty array (note: depending on Claude Code's hook merge semantics, this may or may not block the plugin's hook; experimentation needed).
-5. Mention that partial writes before `BUDGET_EXCEEDED` are still kept.
+1. Cheaper models: `ANTARES_CRONISTA_MODEL=haiku` and `ANTARES_DISTILLER_MODEL=haiku`.
+2. Shorter timeouts: `ANTARES_CRONISTA_TIMEOUT=240`, `ANTARES_DISTILLER_TIMEOUT=300`.
+3. **Disable entirely** — fork the plugin OR override the `PreCompact` + `SessionEnd` hooks in `~/.claude/settings.json` with an empty array (note: depending on Claude Code's hook merge semantics, this may or may not block the plugin's hook; experimentation needed).
+4. Mention that capture only fires when the session delta clears the size gate — trivial sessions spawn no lobos and cost nothing.
 
 **Fail conditions:**
 - Suggests editing the script in plugin cache (which gets overwritten).
