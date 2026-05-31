@@ -17,19 +17,32 @@ One watermark → no double-capture between journal and memories. Both run on Pr
 the session is captured even when it never compacts. They replace the old single extractor
 that only ran on PreCompact (sessions that closed without compacting were lost).
 
-## The SDK dependency — `install.sh` brings it for you
+## The SDK dependency — installed once, stable, survives updates
 
 The headless lobos need `@anthropic-ai/claude-agent-sdk`. It is **not vendored**
-(`node_modules/` is gitignored, so it isn't shipped in the plugin) — instead,
-**`install.sh` runs `npm ci` in `agents-sdk/` for you** (step 4, when `npm` is present).
-After `/antares-memory:install` the lobos are ready; there is no separate manual step.
+(`node_modules/` is gitignored, so it isn't shipped in the plugin). `install.sh`
+installs it **once into a stable dir** — `$ANTARES_SDK_DIR` (default
+`~/.local/share/antares-memory/sdk`), right next to the Python venv — **not** into
+the per-version plugin cache. After `/antares-memory:install` the lobos are ready;
+no separate manual step.
 
-**Manual fallback** — only if you skipped the installer, `npm` was absent at install
-time, or the lobos die with `rc=1` (`ERR_MODULE_NOT_FOUND: @anthropic-ai/claude-agent-sdk`):
+**Why stable, not the cache:** the plugin cache lives in a per-version dir
+(`.../0.5.7/`). If the SDK lived there, every plugin update would land in a fresh
+empty dir and the lobos would silently die with `rc=1` (`ERR_MODULE_NOT_FOUND`).
+Installing once in a stable dir (like the venv) makes it update-proof. ESM ignores
+`NODE_PATH`, so the launchers can't just point an env var at the stable copy —
+instead `antares_link_sdk` (in `lib/common.sh`) symlinks the cache's
+`agents-sdk/node_modules` to the stable install right before launching a lobo. That
+symlink is recreated for free after every update; the heavy `node_modules` is
+installed only once.
+
+**Manual fallback** — only if you skipped the installer or a lobo reports `rc=1`:
 
 ```bash
-cd <plugin-cache>/.../antares-memory-skill/agents-sdk/   # the installed plugin's agents-sdk dir
-npm ci             # clean, reproducible install from package-lock.json (npm install also works)
+mkdir -p ~/.local/share/antares-memory/sdk && cd "$_"
+cp <plugin-cache>/.../antares-memory-skill/agents-sdk/package*.json .
+npm ci                       # reproducible install from package-lock.json
+# then re-run /antares-memory:install (or just let the next launcher relink it)
 ```
 
 Verify: `node -e "import('@anthropic-ai/claude-agent-sdk').then(()=>console.log('SDK ok'))"`.

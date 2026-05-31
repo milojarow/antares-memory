@@ -153,6 +153,8 @@ log "LAUNCH chronicle pipeline (background) event=$event session=$session_id"
 (
     trap 'rm -f "$LOCK"' EXIT
     export CLAUDE_HEADLESS=1
+    # Resolve the SDK from the per-version cache (symlink → stable install, survives updates).
+    antares_link_sdk "$SCRIPT_DIR/../agents-sdk" || log "SDK not installed — run /antares-memory:install (lobos fail rc=1)"
 
     # 1. cronista → journal
     c_out=$(printf '%s' "$cronista_task" | timeout "${ANTARES_CRONISTA_TIMEOUT:-420}" \

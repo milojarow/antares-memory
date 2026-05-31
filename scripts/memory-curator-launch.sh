@@ -85,6 +85,7 @@ log "LAUNCH index-curator (background) cwd=$cwd memories=$n_mem model=${ANTARES_
 (
     trap 'rm -f "$LOCK"' EXIT
     export CLAUDE_HEADLESS=1
+    antares_link_sdk "$SCRIPT_DIR/../agents-sdk" || log "SDK not installed — run /antares-memory:install (lobo fails rc=1)"
     # Backup MEMORY.md before the curator can touch it (always-on file → revertible).
     if [[ -f "$mem_index" ]]; then
         mkdir -p "$BACKUP_DIR" 2>/dev/null || true

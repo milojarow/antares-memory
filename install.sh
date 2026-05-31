@@ -109,17 +109,23 @@ SentenceTransformer("$ANTARES_MODEL")
 PY
 ok "model $ANTARES_MODEL cached"
 
-# Node deps for the SDK lobos (cronista/destilador/gardener/curator). Their .mjs
-# files import @anthropic-ai/claude-agent-sdk; node resolves it from
-# agents-sdk/node_modules, which is gitignored (NOT shipped in the plugin) — so
-# install it here, or the lobos die with rc=1 (MODULE_NOT_FOUND) on a fresh machine.
+# Node SDK for the lobos — installed ONCE in a STABLE dir (like the Python venv
+# above), NOT in the per-version plugin cache. This survives plugin updates; the
+# launchers symlink the cache's agents-sdk/node_modules to it on demand, so the
+# lobos never go mute after an update. (ESM ignores NODE_PATH → a symlink is the
+# native-feeling fix.)
 if command -v npm >/dev/null 2>&1; then
-    echo "    Installing Node SDK for the capture/maintenance lobos..."
-    ( cd "$SCRIPT_DIR/agents-sdk" && npm ci --no-audit --no-fund ) \
-        && ok "installed agents-sdk/node_modules (@anthropic-ai/claude-agent-sdk)" \
-        || warn "npm ci failed — SDK lobos won't run until 'cd agents-sdk && npm ci' succeeds"
+    echo "    Installing the Agent SDK (stable home, survives plugin updates)..."
+    mkdir -p "$ANTARES_SDK_DIR"
+    cp "$SCRIPT_DIR/agents-sdk/package.json" "$SCRIPT_DIR/agents-sdk/package-lock.json" "$ANTARES_SDK_DIR/"
+    if ( cd "$ANTARES_SDK_DIR" && npm ci --no-audit --no-fund ); then
+        ok "SDK installed at $ANTARES_SDK_DIR (@anthropic-ai/claude-agent-sdk)"
+        antares_link_sdk "$SCRIPT_DIR/agents-sdk" && ok "linked plugin cache → stable SDK"
+    else
+        warn "npm ci failed — SDK lobos won't run until it succeeds (see reference/lobos-agents-sdk.md)"
+    fi
 else
-    warn "npm not found — SDK lobos (capture/maintenance) skipped. Install Node, then: cd agents-sdk && npm ci"
+    warn "npm not found — SDK lobos skipped. Install Node, then re-run /antares-memory:install"
 fi
 
 # ─── 5. systemd user unit ─────────────────────────────────────────────────────

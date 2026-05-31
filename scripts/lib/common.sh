@@ -27,6 +27,10 @@ export ANTARES_STATE="${ANTARES_STATE:-$HOME/.local/state/antares-memory}"
 export ANTARES_MODEL="${ANTARES_MODEL:-paraphrase-multilingual-MiniLM-L12-v2}"
 export ANTARES_VENV_PY="$ANTARES_VENV/bin/python3"
 
+# Stable home for the Agent SDK's node_modules — installed ONCE (like the venv
+# above), so it survives plugin updates; the per-version plugin cache does not.
+export ANTARES_SDK_DIR="${ANTARES_SDK_DIR:-$HOME/.local/share/antares-memory/sdk}"
+
 # Root of all slug-based memory dirs.
 export ANTARES_PROJECTS_DIR="$HOME/.claude/projects"
 
@@ -57,6 +61,18 @@ antares_home_memory_dir() {
 antares_venv_ready() {
     [[ -x "$ANTARES_VENV_PY" ]] \
         && "$ANTARES_VENV_PY" -c "import sentence_transformers" 2>/dev/null
+}
+
+# Make the SDK resolvable from the .mjs lobos living in the (per-version) plugin
+# cache: symlink their agents-sdk/node_modules to the stable install. ESM ignores
+# NODE_PATH, so a real node_modules in the resolution path is required — a symlink
+# suffices and is recreated for free after every plugin update. Returns nonzero if
+# the stable SDK isn't installed yet (run install.sh / npm ci in $ANTARES_SDK_DIR).
+antares_link_sdk() {
+    local sdk_parent="$1"   # the agents-sdk dir that holds the .mjs lobos
+    [[ -e "$sdk_parent/node_modules" ]] && return 0           # already there (real dir or good link)
+    [[ -d "$ANTARES_SDK_DIR/node_modules" ]] || return 1      # stable SDK not installed yet
+    ln -sfn "$ANTARES_SDK_DIR/node_modules" "$sdk_parent/node_modules" 2>/dev/null
 }
 
 # Stable log helper. Usage: antares_log <file> <msg...>

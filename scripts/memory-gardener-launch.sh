@@ -93,6 +93,7 @@ log "LAUNCH gardener (background) cwd=$cwd memories=$n_mem model=${ANTARES_GARDE
 (
     trap 'rm -f "$LOCK"' EXIT
     export CLAUDE_HEADLESS=1
+    antares_link_sdk "$SCRIPT_DIR/../agents-sdk" || log "SDK not installed — run /antares-memory:install (lobo fails rc=1)"
 
     # FULL backup of the base before the gardener can merge/flag anything.
     mkdir -p "$BACKUP_DIR" 2>/dev/null || true
