@@ -17,18 +17,21 @@ One watermark → no double-capture between journal and memories. Both run on Pr
 the session is captured even when it never compacts. They replace the old single extractor
 that only ran on PreCompact (sessions that closed without compacting were lost).
 
-## Prerequisite — bring the SDK (one command)
+## The SDK dependency — `install.sh` brings it for you
 
 The headless lobos need `@anthropic-ai/claude-agent-sdk`. It is **not vendored**
-(`node_modules/` is gitignored) — the skill ships the config, you bring the SDK:
+(`node_modules/` is gitignored, so it isn't shipped in the plugin) — instead,
+**`install.sh` runs `npm ci` in `agents-sdk/` for you** (step 4, when `npm` is present).
+After `/antares-memory:install` the lobos are ready; there is no separate manual step.
+
+**Manual fallback** — only if you skipped the installer, `npm` was absent at install
+time, or the lobos die with `rc=1` (`ERR_MODULE_NOT_FOUND: @anthropic-ai/claude-agent-sdk`):
 
 ```bash
-cd "$(dirname "$(command -v claude)")"   # or wherever the plugin cache lives
-# In practice: cd into the installed plugin's agents-sdk/ dir, then:
-npm ci             # clean, reproducible install from package-lock.json
+cd <plugin-cache>/.../antares-memory-skill/agents-sdk/   # the installed plugin's agents-sdk dir
+npm ci             # clean, reproducible install from package-lock.json (npm install also works)
 ```
 
-The plugin ships `agents-sdk/package.json` + `package-lock.json`; `npm ci` there is the whole setup (`npm install` also works).
 Verify: `node -e "import('@anthropic-ai/claude-agent-sdk').then(()=>console.log('SDK ok'))"`.
 
 - **Auth** — uses your Claude subscription login (`apiKeySource=none`). Do **not**

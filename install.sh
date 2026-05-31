@@ -80,7 +80,7 @@ else
 fi
 
 # ─── 4. Python venv + deps ────────────────────────────────────────────────────
-say "4/7  Setting up Python venv (this downloads ~400MB on first run)"
+say "4/7  Setting up runtime deps — Python venv + Node SDK (downloads ~400MB on first run)"
 if [[ ! -x "$ANTARES_VENV_PY" ]]; then
     python3 -m venv "$ANTARES_VENV"
     ok "created venv at $ANTARES_VENV"
@@ -108,6 +108,19 @@ from sentence_transformers import SentenceTransformer
 SentenceTransformer("$ANTARES_MODEL")
 PY
 ok "model $ANTARES_MODEL cached"
+
+# Node deps for the SDK lobos (cronista/destilador/gardener/curator). Their .mjs
+# files import @anthropic-ai/claude-agent-sdk; node resolves it from
+# agents-sdk/node_modules, which is gitignored (NOT shipped in the plugin) — so
+# install it here, or the lobos die with rc=1 (MODULE_NOT_FOUND) on a fresh machine.
+if command -v npm >/dev/null 2>&1; then
+    echo "    Installing Node SDK for the capture/maintenance lobos..."
+    ( cd "$SCRIPT_DIR/agents-sdk" && npm ci --no-audit --no-fund ) \
+        && ok "installed agents-sdk/node_modules (@anthropic-ai/claude-agent-sdk)" \
+        || warn "npm ci failed — SDK lobos won't run until 'cd agents-sdk && npm ci' succeeds"
+else
+    warn "npm not found — SDK lobos (capture/maintenance) skipped. Install Node, then: cd agents-sdk && npm ci"
+fi
 
 # ─── 5. systemd user unit ─────────────────────────────────────────────────────
 say "5/7  Installing systemd user unit"
