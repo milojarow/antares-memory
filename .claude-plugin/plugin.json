@@ -1,6 +1,6 @@
 {
   "name": "antares-memory-skill",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "description": "Persistent semantic + keyword memory system for Claude Code — embeddings, BM25 hybrid search, auto-capture on PreCompact + SessionEnd, journal, daemon, hooks",
   "author": {
     "name": "milojarow",

@@ -103,7 +103,9 @@ log "LAUNCH gardener (background) cwd=$cwd memories=$n_mem model=${ANTARES_GARDE
     out=$(printf '%s' "$task" | timeout "${ANTARES_GARDENER_TIMEOUT:-420}" \
         node "$SCRIPT_DIR/../agents-sdk/gardener.mjs" 2>>"$LOG")
     rc=$?
-    echo "$now" > "$STAMP"
+    # Stamp the gate ONLY on success — a failed run (rc!=0) must NOT block the 24h gate,
+    # or one failure locks the gardener out for ~24h without ever having run. Retry next close.
+    if (( rc == 0 )); then echo "$now" > "$STAMP"; else log "gardener rc=$rc — gate NOT stamped, retries next close"; fi
 
     # Execute the lobo's deletions list — VALIDATED: a .md inside home_dir, never MEMORY.md.
     deleted=0

@@ -96,8 +96,9 @@ log "LAUNCH index-curator (background) cwd=$cwd memories=$n_mem model=${ANTARES_
     out=$(printf '%s' "$task" | timeout "${ANTARES_CURATOR_TIMEOUT:-420}" \
         node "$SCRIPT_DIR/../agents-sdk/index-curator.mjs" 2>>"$LOG")
     rc=$?
-    echo "$now" > "$STAMP"
     result=$(printf '%s' "$out" | jq -r '.result // empty' 2>/dev/null | head -c 1000)
+    # Stamp the gate ONLY on success — a failed run (rc!=0) must NOT block the 7d gate; retry next close.
+    if (( rc == 0 )); then echo "$now" > "$STAMP"; else log "curator rc=$rc — gate NOT stamped, retries next close"; fi
     log "DONE rc=$rc result=$result"
 ) >/dev/null 2>&1 &
 disown
