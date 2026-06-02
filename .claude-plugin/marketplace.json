@@ -10,7 +10,7 @@
       "name": "antares-memory-skill",
       "source": "./",
       "description": "Turnkey persistent memory system: embeddings (sentence-transformers) + BM25 hybrid search, UNIX-socket daemon, auto-capture via a 6-lobo pipeline (cronista→destilador on PreCompact+SessionEnd, gardener/curator maintenance, router/recall on-demand — Agent SDK + filesystem subagents), journal, slug-based HOME/CURRENT scopes (native Claude Code convention), frontmatter taxonomy",
-      "version": "0.5.8",
+      "version": "0.5.9",
       "author": {
         "name": "milojarow",
         "url": "https://github.com/milojarow"

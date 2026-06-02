@@ -4,7 +4,7 @@
 
 ## What is this?
 
-A complete memory system for Claude Code that survives across sessions: the assistant writes lessons, gotchas, and decisions to disk as `.md` files; a hybrid search daemon (embeddings + BM25) makes them recallable; relevant memories auto-inject on every prompt; and on context compaction, a headless `claude -p` extracts new memories from the transcript before history is lost.
+A complete memory system for Claude Code that survives across sessions: the assistant writes lessons, gotchas, and decisions to disk as `.md` files; a hybrid search daemon (embeddings + BM25) makes them recallable; relevant memories auto-inject on every prompt; and on context compaction, isolated Agent SDK subagents (cronista → destilador) extract new memories from the transcript before history is lost.
 
 Everything ships in one plugin. After `/antares-memory:install`, you get:
 

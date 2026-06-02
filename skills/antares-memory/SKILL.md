@@ -119,4 +119,4 @@ Every hook is failsafe: if the daemon is down, the venv isn't ready, or any step
 - [reference/writing-memories.md](reference/writing-memories.md) — decision rules, dedup discipline, when to enrich vs create
 - [reference/tuning-search.md](reference/tuning-search.md) — threshold, weights, top-k, model swap, chunk size
 - [reference/troubleshooting.md](reference/troubleshooting.md) — daemon, FTS5, indexer, hooks, capture lobos
-- [reference/lobos-agents-sdk.md](reference/lobos-agents-sdk.md) — the 5 lobos (Agent SDK subagents): SDK install, isolation, triggers, scaling (digest-in-bash), fork-bomb defenses
+- [reference/lobos-agents-sdk.md](reference/lobos-agents-sdk.md) — the 6 lobos (4 Agent SDK + 2 filesystem subagents): SDK install, isolation, triggers, scaling (digest-in-bash), fork-bomb defenses
