@@ -5,7 +5,7 @@ description: Persistent semantic + keyword memory system for Claude Code. Use wh
 
 # antares-memory
 
-> **💭 ACTIVE-SKILL MARKER:** Prefija tu reply con 💭 **solo en turnos donde el trabajo toca el dominio de `antares-memory`** — sistema antares de memoria — embeddings, BM25 hybrid search, auto-extract on PreCompact, journal, daemon, hooks. La **capa/proyecto da igual** (frontend, backend, n8n, script local — todos valen): lo que importa es si *este turno* toca el dominio. En turnos que NO lo tocan (typecheck, build, deploy, git ops, edición o curl de otros dominios), **omite 💭** aunque la skill se haya cargado antes en la sesión. Si otras skills activas también aplican al mismo turno, **apila sus emojis** en el prefijo.
+> **💭 ACTIVE-SKILL MARKER:** Prefix your reply with 💭 **only on turns where the work touches the `antares-memory` domain** — the antares memory system: embeddings, BM25 hybrid search, auto-extract on PreCompact, journal, daemon, hooks — regardless of the layer/project (frontend, backend, a local script — all count); what matters is whether *this turn* touches the domain. On turns that do NOT touch it (typecheck, build, deploy, git ops, editing or curl in other domains), **omit 💭** even if the skill loaded earlier in the session. If other active skills also apply to the same turn, **stack their emojis** in the prefix.
 
 A turnkey persistent memory system for Claude Code: cross-session knowledge written to flat `.md` files, indexed with embeddings + BM25, auto-injected on `UserPromptSubmit`, and auto-captured on `PreCompact` + `SessionEnd` before context is lost.
 
