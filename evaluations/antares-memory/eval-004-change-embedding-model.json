@@ -1,0 +1,25 @@
+{
+  "id": "antares-memory-004",
+  "skills": ["antares-memory"],
+  "query": "Quiero probar BAAI/bge-large-en-v1.5 en lugar del modelo multilingual default. Como lo cambio?",
+  "expected_behavior": [
+    "Activates the antares-memory skill",
+    "Routes to reference/tuning-search.md for the model-swap procedure",
+    "Sets the ANTARES_MODEL env var (systemd unit Environment= or ~/.config/environment.d/)",
+    "Drops embeddings from EVERY slug's DB before reindexing — mixed dimensions give garbage results (DELETE FROM memory_chunks across all .memory-index.db)",
+    "Restarts the daemon",
+    "Reindexes HOME (other slugs reindex on their next session-start)",
+    "Warns bge-large is English-only — recall on Spanish prompts degrades",
+    "Notes the TARGET_TOKENS chunk-size constant should be bumped for the model's 512-token window"
+  ],
+  "expected_content": [
+    "ANTARES_MODEL",
+    "memory_chunks",
+    ".memory-index.db",
+    "English-only",
+    "TARGET_TOKENS",
+    "tuning-search.md"
+  ],
+  "priority": "high",
+  "notes": "Guards against: changing the env var without dropping chunks (mixed-dimension corruption); dropping chunks for only one slug; and failing to warn about the multilingual-to-English language mismatch degrading Spanish recall."
+}

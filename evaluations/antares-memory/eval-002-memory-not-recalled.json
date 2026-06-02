@@ -1,0 +1,25 @@
+{
+  "id": "antares-memory-002",
+  "skills": ["antares-memory"],
+  "query": "Tengo una memoria sobre como funciona el SSH tunnel a MongoDB Compass, pero cuando le pregunto al asistente sobre eso, nunca aparece en el bloque <auto-loaded-memory>. Que chequeo?",
+  "expected_behavior": [
+    "Activates the antares-memory skill",
+    "Routes to reference/troubleshooting.md for the recall-failure diagnostic flow",
+    "Runs /antares-memory:status FIRST as the entry diagnostic",
+    "Tails $ANTARES_STATE/logs/memory-search.log to see last hook activity",
+    "Forces a manual search via $ANTARES_VENV_PY scripts/memory-search.py to verify the memory ranks",
+    "If it ranks below the 0.35 threshold, suggests rewriting description to match the operator's wording",
+    "If it doesn't rank at all, checks whether it was indexed by querying the slug's .memory-index.db"
+  ],
+  "expected_content": [
+    "/antares-memory:status",
+    "memory-search.log",
+    "memory-search.py",
+    "0.35",
+    "<auto-loaded-memory>",
+    ".memory-index.db",
+    "troubleshooting.md"
+  ],
+  "priority": "high",
+  "notes": "Guards against: jumping straight to 'the memory must not exist'; suggesting a description rewrite before checking the daemon/index; and skipping /antares-memory:status as the first step. The bug is almost always indexing/threshold, not a missing file."
+}

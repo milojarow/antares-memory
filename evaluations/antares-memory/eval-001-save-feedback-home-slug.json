@@ -1,0 +1,26 @@
+{
+  "id": "antares-memory-001",
+  "skills": ["antares-memory"],
+  "query": "Acabo de aprender que `paru` no acepta `--noconfirm` antes del `-S`. Debe ir despues o el flag se ignora. Guardalo para no volver a equivocarme.",
+  "expected_behavior": [
+    "Activates the antares-memory skill",
+    "Routes to reference/frontmatter-taxonomy.md and reference/writing-memories.md for type + scope decision",
+    "Identifies this as a feedback_* memory (a correction the operator wants persisted)",
+    "Identifies HOME slug scope because the paru quirk applies across all cwds",
+    "Proposes a filename with the feedback_ prefix and snake_case after (e.g. feedback_paru_noconfirm_position.md)",
+    "Proposes destination ~/.claude/projects/<slugify($HOME)>/memory/, not the v0.1.x ~/.claude/memory/ path",
+    "Proposes frontmatter with name, description, type: feedback",
+    "Notes the PostToolUse hook auto-reindexes the affected slug"
+  ],
+  "expected_content": [
+    "feedback_",
+    "type: feedback",
+    "~/.claude/projects/",
+    "HOME slug",
+    "PostToolUse",
+    "frontmatter-taxonomy.md",
+    "writing-memories.md"
+  ],
+  "priority": "high",
+  "notes": "Guards against: wrong prefix/type; writing to the legacy ~/.claude/memory/ path; suggesting an @import in ~/.claude/CLAUDE.md (the v0.1.x pattern); and writing to the CURRENT slug when a cross-cutting tool quirk belongs in HOME."
+}
