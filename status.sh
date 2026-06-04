@@ -79,7 +79,7 @@ else
 fi
 if [[ -S "$SOCKET" ]]; then
     pong=$(printf '{"op":"ping"}\n' | timeout 2 socat -t 2 - "UNIX-CONNECT:$SOCKET" 2>/dev/null || echo "")
-    if [[ "$pong" == *'"pong":true'* ]]; then
+    if [[ "${pong//[[:space:]]/}" == *'"pong":true'* ]]; then
         ok "socket responsive at $SOCKET"
     else
         bad "socket exists but ping failed"

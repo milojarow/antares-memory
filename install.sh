@@ -146,7 +146,11 @@ sed \
 ok "wrote $UNIT_FILE"
 
 systemctl --user daemon-reload
-systemctl --user enable --now antares-memory-daemon.service
+systemctl --user enable antares-memory-daemon.service
+# restart (not enable --now): on a re-install over an already-running daemon,
+# --now is a no-op and the live process keeps stale code; restart guarantees the
+# running process matches the unit file just written.
+systemctl --user restart antares-memory-daemon.service
 sleep 1
 if systemctl --user is-active --quiet antares-memory-daemon.service; then
     ok "daemon running"
