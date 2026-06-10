@@ -32,7 +32,7 @@ antares-memory-skill/
 ## The skill
 
 ### antares-memory
-Documents the memory system: frontmatter taxonomy (`feedback_*` / `reference_*` / `project_*` / `user_*` / `tool_*`), global vs project scope decision rule, dedup discipline, hybrid search tuning (cosine + BM25 weights, threshold), and how to run / troubleshoot the daemon. Activates when the user mentions memory/recall/save, edits files under `~/.claude/projects/<slug>/memory/`, or runs an `/antares-memory:*` command.
+Documents the memory system: frontmatter taxonomy (`feedback_*` / `reference_*` / `project_*` / `user_*` / `tool_*`), global vs project scope decision rule, dedup discipline, hybrid search tuning (cosine + BM25 weights, threshold), and how to run / troubleshoot the daemon. **Maintenance-only activation (since 0.5.12):** triggers when working ON the pipeline — install/migrate/tuning/troubleshooting/extending — and explicitly NOT on routine memory operations (save/recall/"guarda esto"); those run through the installed hooks + memory-router/memory-recall subagents with zero context cost. The skill is the manual for the machinery, and the machinery runs without the model reading the manual.
 
 ## Architecture
 
