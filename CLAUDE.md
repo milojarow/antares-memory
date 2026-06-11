@@ -52,7 +52,7 @@ Re-running `install.sh` IS the update path. `uninstall.sh` removes exactly what 
 
 ## Working on this repo
 
-1. Edit here (the clone is the source; on the dev machines the keeper syncs it with GitHub).
+1. Edit here (the clone is the source). Sync is manual and deliberate: `git pull --ff-only` before editing, commit + push when done — this repo is infrastructure, not a skill, so no automation ships it.
 2. No version files to bump — versioning is the git history (tag if a milestone warrants it).
 3. Commit + push.
 4. Deploying to a machine = `./install.sh` on that machine (or, on the dev machines that pre-date the installer, copy the changed files to `~/.claude/scripts|agents-sdk` and restart the daemon if daemon/search files changed).
