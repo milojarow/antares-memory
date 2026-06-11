@@ -32,7 +32,7 @@ Each slug dir contains:
 └── .memory-index.db         ← SQLite (embeddings + FTS5)
 ```
 
-Two scopes the skill operates on:
+Two scopes the system operates on:
 
 - **HOME slug** = `slugify($HOME)`. The "global" by convention — loaded when cwd == $HOME.
 - **CURRENT slug** = `slugify($PWD)`. The "project" by convention — loaded when cwd matches.
@@ -43,7 +43,7 @@ Files are POSIX `.md` files. The DB is a derivative — losing it is harmless (`
 
 ### How `MEMORY.md` gets loaded — no `@`-import required
 
-This is the whole reason the skill uses the slug convention: **Claude Code automatically loads `~/.claude/projects/<slug-matching-cwd>/memory/MEMORY.md` into the session at start.**
+This is the whole reason the system uses the slug convention: **Claude Code automatically loads `~/.claude/projects/<slug-matching-cwd>/memory/MEMORY.md` into the session at start.**
 
 You do NOT need to add anything to your `~/.claude/CLAUDE.md`. No `@`-import. It just works because that path matches Claude Code's native cwd-slug convention.
 
@@ -64,7 +64,7 @@ Keep `MEMORY.md` short — it's overhead per prompt. Use it for directives you w
 |---|---|---|
 | `SessionStart` (matcher `startup\|resume\|clear\|compact`) | every session | reindex HOME + CURRENT slugs if any `.md` mtime > DB mtime |
 | `PostToolUse` (matcher `Write\|Edit\|MultiEdit`) | after every edit | async background reindex of the affected slug |
-| Manual | `bash $ANTARES_VENV_PY .../memory-index.py --scope home` | full pass |
+| Manual | `"$ANTARES_VENV_PY" .../memory-index.py --scope home` | full pass |
 
 ### Chunking
 
@@ -107,7 +107,7 @@ final_score = 0.7 × cosine(query_embedding, chunk_embedding)
             + 0.3 × normalized_bm25(query_text, chunk)
 ```
 
-Both weights and the `0.35` minimum threshold are env-tunable for CLI/daemon queries (not for the hook itself — see SKILL.md).
+Both weights and the `0.35` minimum threshold are env-tunable for CLI/daemon queries (not for the hook itself — see [tuning-search.md](tuning-search.md)).
 
 ### Per-file deduplication
 
@@ -129,7 +129,7 @@ Wire protocol (one JSON request, one JSON response, newline-terminated):
  "timing_ms": 87, "scopes_searched": ["home", "current:..."]}
 ```
 
-`{"op": "ping"}` is the health check used by `/antares-memory:status`.
+`{"op": "ping"}` is the health check used by `./status.sh`.
 
 ## 4. Auto-inject
 
@@ -165,7 +165,7 @@ transcript ──[cronista]──▶ journal ──[destilador]──▶ memorie
 ```
 
 1. A per-session **watermark** (lines of the `.jsonl` already processed) selects the NEW
-   segment (delta). A first-seen in-flight session caps the delta at the last ~100 KB so
+   segment (delta). A first-seen in-flight session caps the delta at the last ~300 KB so
    the lobo doesn't choke on a multi-MB backlog.
 2. Preprocess the delta to user/assistant text (jq, tool calls stripped).
 3. **cronista** (`agents-sdk/cronista.mjs`, isolated SDK) appends the episodic chronicle

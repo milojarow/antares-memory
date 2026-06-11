@@ -19,7 +19,7 @@ Your job: decide **WHERE** it belongs, **dedup** against what already exists, th
 - **HOME (global)** — cross-cutting lessons that apply in ANY cwd: operator feedback on how to work (`feedback_*`), tool/API quirks (`reference_*`), deep app/service knowledge (`tool_*`), OS/environment facts.
 - **CURRENT (project)** — context that only matters in this cwd: architecture decisions for this codebase, project-specific gotchas, ongoing TODOs.
 - **Both** — rare; only if the lesson has a genuinely global part AND a cwd-specific part. Prefer one.
-- **Persona files** (`~/.claude/projects/<home-slug>/SOUL.md` / `IDENTITY.md` / `USER.md` / `TOOLS.md`) — ONLY if the operator explicitly frames it as a change to who you are / how you behave / who they are / the environment, AND says so clearly. When unsure between a persona file and a `feedback_*`/`user_*` memory, choose the memory and say so. Persona edits are higher-stakes; never guess into them.
+- **Persona files** — only if the operator maintains them (an optional convention; check they exist before routing here). If absent, identity-type facts go to `user_*` memories instead — ONLY if the operator explicitly frames it as a change to who you are / how you behave / who they are / the environment, AND says so clearly. When unsure between a persona file and a `feedback_*`/`user_*` memory, choose the memory and say so. Persona edits are higher-stakes; never guess into them.
 - When unsure between HOME and CURRENT → **HOME** (a global memory occasionally surfacing elsewhere is harmless; a misfiled CURRENT one is invisible everywhere else).
 
 ## 2. Dedup BEFORE writing (mandatory)

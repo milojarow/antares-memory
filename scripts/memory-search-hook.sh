@@ -30,7 +30,7 @@ if (( ${#prompt} < 30 )); then
 fi
 
 # Daemon down → graceful degradation. This is the normal path before the
-# operator runs /antares-memory:install — keep silent in logs so it doesn't
+# operator runs install.sh — keep silent in logs so it doesn't
 # look like an error.
 if [[ ! -S "$SOCKET" ]]; then
   printf '%s DAEMON_DOWN prompt=%q\n' "$(date -Iseconds)" "${prompt:0:80}" >>"$LOG" 2>/dev/null || true

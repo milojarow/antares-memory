@@ -339,7 +339,7 @@ def main():
     except ImportError:
         print(
             "Error: sentence-transformers not installed.\n"
-            "Run /antares-memory:install to set up the venv.",
+            "Run install.sh to set up the venv.",
             file=sys.stderr,
         )
         sys.exit(1)

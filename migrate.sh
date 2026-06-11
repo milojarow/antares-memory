@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # migrate.sh — helper for moving existing memories into the slug-based layout.
 #
-# In v0.2+, the skill uses Claude Code's native ~/.claude/projects/<slug>/memory/
+# antares-memory uses Claude Code's native ~/.claude/projects/<slug>/memory/
 # convention. If you came from an older path-based layout, this script helps
 # consolidate stragglers.
 #
@@ -32,7 +32,7 @@ Consolidates memories into the HOME slug dir:
     $(antares_home_memory_dir)
 
 Common sources you might want to migrate from:
-  - A legacy ~/.claude/memory/ from antares-memory v0.1.x
+  - A legacy ~/.claude/memory/ from the legacy pre-slug layout
   - Memories scattered across non-HOME slug dirs that you want global
 
 By default, scans ~/.claude/memory (if it exists) and prints a plan. Add
@@ -134,5 +134,5 @@ if antares_venv_ready; then
     "$ANTARES_VENV_PY" "$SCRIPT_DIR/scripts/memory-index.py" --scope home || true
     echo "Done. Daemon will see the new files on the next query."
 else
-    echo "Venv not ready — run /antares-memory:install first."
+    echo "Venv not ready — run install.sh first."
 fi

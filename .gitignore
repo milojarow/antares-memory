@@ -2,7 +2,7 @@
 node_modules/
 agents-sdk/node_modules/
 
-# Claude Code operator state (the repo's own CLAUDE.md IS committed — skill-repo convention)
+# Claude Code operator state (the repo's own CLAUDE.md IS committed — repo convention)
 .claude/
 
 # OS / editor cruft

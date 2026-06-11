@@ -5,7 +5,7 @@ Storage model: Claude Code's native convention.
     ~/.claude/projects/<slugify(cwd)>/memory/   ← auto-loaded MEMORY.md per cwd
     ~/.claude/projects/<slugify($HOME)>/memory/ ← "global" by convention
 
-The skill mirrors this so operators never need `@`-imports in CLAUDE.md —
+antares-memory mirrors this so operators never need `@`-imports in CLAUDE.md —
 Claude Code already loads MEMORY.md from the cwd's slug dir.
 
 Import from sibling scripts:

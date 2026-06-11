@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Start with `/antares-memory:status`. It tells you which layer is broken before you go digging.
+Start with `./status.sh` (from the repo clone). It tells you which layer is broken before you go digging.
 
 ## Daemon not running
 
@@ -10,9 +10,9 @@ systemctl --user status antares-memory-daemon
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `Loaded: not-found` | Unit file missing | Re-run `/antares-memory:install` |
+| `Loaded: not-found` | Unit file missing | Re-run `./install.sh` |
 | `Active: failed` | Daemon crashed at startup | `journalctl --user -u antares-memory-daemon -n 50` for the error |
-| `Active: active (running)` but no socket | Daemon still loading model | Wait 3–5 seconds and re-check `/antares-memory:status` |
+| `Active: active (running)` but no socket | Daemon still loading model | Wait 3–5 seconds and re-check `./status.sh` (from the repo clone) |
 
 Common crash causes:
 - `ImportError: sentence_transformers` — venv corrupted or `ANTARES_VENV` env in the unit points wrong. Verify `cat ~/.config/systemd/user/antares-memory-daemon.service`.
@@ -41,7 +41,7 @@ systemctl --user restart antares-memory-daemon
 
 Walk the chain:
 
-1. `/antares-memory:status` — is the daemon green?
+1. `./status.sh` (from the repo clone) — is the daemon green?
 2. `tail $ANTARES_STATE/logs/memory-search.log` — what's the last entry?
    - `DAEMON_DOWN` → daemon issue (see above)
    - `TIMEOUT` → daemon slow; check `journalctl --user -u antares-memory-daemon`
@@ -49,13 +49,13 @@ Walk the chain:
    - `OK timing=...ms hits=N` → memories WERE injected; check Claude Code's view of the session
 3. Run a manual search with the same query:
    ```bash
-   "$ANTARES_VENV_PY" "${CLAUDE_PLUGIN_ROOT}/scripts/memory-search.py" "your query"
+   "$ANTARES_VENV_PY" "$HOME/.claude/scripts/memory-search.py" "your query"
    ```
    If results appear here but not in `<auto-loaded-memory>`, the prompt going through the hook may be different (Claude Code can rewrite prompts; check the actual `prompt` field in the hook input).
 
 ## `MEMORY.md` isn't auto-loaded
 
-The skill relies on Claude Code's native convention: it loads `~/.claude/projects/<slugify(cwd)>/memory/MEMORY.md`.
+The system relies on Claude Code's native convention: it loads `~/.claude/projects/<slugify(cwd)>/memory/MEMORY.md`.
 
 If your `MEMORY.md` isn't showing up in the session's system prompt:
 
@@ -69,7 +69,7 @@ If your `MEMORY.md` isn't showing up in the session's system prompt:
 
 2. **Confirm Claude Code version supports this convention**. The native auto-loading of `~/.claude/projects/<slug>/memory/MEMORY.md` is a stable Claude Code behavior. If it doesn't seem to work, sanity-check by inspecting the system prompt of a fresh session — `MEMORY.md` content should appear under a heading like *"Contents of /home/.../memory/MEMORY.md (user's auto-memory, persists across conversations)"*.
 
-3. **Don't add `@~/.claude/...` to your CLAUDE.md unless you're sure the path won't auto-load** — the `@`-import is for v0.1.x or non-standard paths. With v0.2+ slug layout, it's redundant.
+3. **Don't add `@~/.claude/...` to your CLAUDE.md unless you're sure the path won't auto-load** — the `@`-import is only for the legacy pre-slug layout or non-standard paths. With the slug layout, it's redundant.
 
 ## Memories not being indexed after I add them
 
@@ -89,9 +89,9 @@ If 0:
 Manual reindex:
 
 ```bash
-"$ANTARES_VENV_PY" "${CLAUDE_PLUGIN_ROOT}/scripts/memory-index.py" --scope home
+"$ANTARES_VENV_PY" "$HOME/.claude/scripts/memory-index.py" --scope home
 # or for a specific cwd:
-"$ANTARES_VENV_PY" "${CLAUDE_PLUGIN_ROOT}/scripts/memory-index.py" --scope current --cwd /path
+"$ANTARES_VENV_PY" "$HOME/.claude/scripts/memory-index.py" --scope current --cwd /path
 ```
 
 ## FTS5 missing
@@ -129,12 +129,12 @@ To force-trigger a manual capture (testing):
 
 ```bash
 echo '{"transcript_path":"/path/to/some.jsonl","session_id":"test","hook_event_name":"SessionEnd","cwd":"'"$PWD"'"}' \
-  | bash "${CLAUDE_PLUGIN_ROOT}/scripts/memory-chronicle-launch.sh"
+  | bash "$HOME/.claude/scripts/memory-chronicle-launch.sh"
 ```
 
 ## Cost-tuning the capture lobos
 
-The capture pipeline (cronista → destilador) and the maintenance lobos (gardener, curator) each read per-lobo env vars — no source edits (the scripts live in plugin cache and get overwritten on update). Set them e.g. in `~/.config/environment.d/antares-memory.conf`:
+The capture pipeline (cronista → destilador) and the maintenance lobos (gardener, curator) each read per-lobo env vars — no source edits (deployed scripts get overwritten on re-install). Set them e.g. in `~/.config/environment.d/antares-memory.conf`:
 
 ```
 # cheaper capture: smaller model + shorter timeout
@@ -155,7 +155,7 @@ Recover for a given slug:
 ```bash
 DB=~/.claude/projects/<slug>/memory/.memory-index.db
 sqlite3 "$DB" "DELETE FROM memory_chunks;"
-"$ANTARES_VENV_PY" "${CLAUDE_PLUGIN_ROOT}/scripts/memory-index.py" --scope home   # or --scope current --cwd /path
+"$ANTARES_VENV_PY" "$HOME/.claude/scripts/memory-index.py" --scope home   # or --scope current --cwd /path
 systemctl --user restart antares-memory-daemon
 ```
 
@@ -167,18 +167,18 @@ If the daemon dies and one session's hook is mid-query, that session gets an emp
 
 Restart fixes everything: `systemctl --user restart antares-memory-daemon`.
 
-## After plugin update, things break
+## After an update, things break
 
-The plugin scripts live in `~/.claude/plugins/cache/.../antares-memory-skill/`. Plugin auto-update rebuilds this dir. The user's data, venv, and systemd unit are OUTSIDE this dir, so they survive.
+Deployed scripts live in `~/.claude/scripts/` and get refreshed by `./install.sh`. The user's data, venv, and systemd unit live elsewhere and survive any re-deploy.
 
-If a plugin update changes script logic in a way that's incompatible with the existing venv:
+If an update changes script logic in a way that's incompatible with the existing venv:
 
 ```bash
-/antares-memory:install   # idempotent — adds missing pieces
+./install.sh   # idempotent — adds missing pieces
 ```
 
-If a plugin update changes the daemon script path (rare), the systemd unit's `ExecStart` still points to the old (now-deleted) script. Re-render the unit:
+If the daemon script path ever changes (rare), the systemd unit's `ExecStart` would point at the old script. Re-render the unit:
 
 ```bash
-/antares-memory:install   # re-runs the template rendering
+./install.sh   # re-runs the template rendering
 ```

@@ -20,14 +20,14 @@ that only ran on PreCompact (sessions that closed without compacting were lost).
 ## The SDK dependency — installed once, stable, survives updates
 
 The headless lobos need `@anthropic-ai/claude-agent-sdk`. It is **not vendored**
-(`node_modules/` is gitignored, so it isn't shipped in the plugin). `install.sh`
+(`node_modules/` is gitignored, so it isn't shipped in the repo). `install.sh`
 installs it **once into a stable dir** — `$ANTARES_SDK_DIR` (default
 `~/.local/share/antares-memory/sdk`), right next to the Python venv — **not** into
-the per-version plugin cache. After `/antares-memory:install` the lobos are ready;
+the deploy dir. After `./install.sh` the lobos are ready;
 no separate manual step.
 
-**Why stable, not the cache:** the plugin cache lives in a per-version dir
-(`.../0.5.7/`). If the SDK lived there, every plugin update would land in a fresh
+**Why a stable SDK home:** the deploy dir (`~/.claude/agents-sdk/`) gets refreshed
+on every re-install. If the SDK lived there, every update would land in a fresh
 empty dir and the lobos would silently die with `rc=1` (`ERR_MODULE_NOT_FOUND`).
 Installing once in a stable dir (like the venv) makes it update-proof. ESM ignores
 `NODE_PATH`, so the launchers can't just point an env var at the stable copy —
@@ -40,9 +40,9 @@ installed only once.
 
 ```bash
 mkdir -p ~/.local/share/antares-memory/sdk && cd "$_"
-cp <plugin-cache>/.../antares-memory-skill/agents-sdk/package*.json .
+cp <repo-clone>/agents-sdk/package*.json .
 npm ci                       # reproducible install from package-lock.json
-# then re-run /antares-memory:install (or just let the next launcher relink it)
+# then re-run ./install.sh (or just let the next launcher relink it)
 ```
 
 Verify: `node -e "import('@anthropic-ai/claude-agent-sdk').then(()=>console.log('SDK ok'))"`.
@@ -96,7 +96,7 @@ unique content into the survivor *before* listing a file, and it keeps its own
 preferences memory + `.gardener-changelog.md`. The one rule it honors above all: never
 lose an important memory — when unsure, KEEP.
 
-## Knobs (env vars — no script edits, survive plugin updates)
+## Knobs (env vars — no script edits, survive re-installs)
 
 Per SDK lobo, `_MODEL` / `_EFFORT` / `_TIMEOUT`: `ANTARES_CRONISTA_*` · `ANTARES_DISTILLER_*`
 · `ANTARES_GARDENER_*` · `ANTARES_CURATOR_*`. Defaults: cronista & destilador `sonnet` /

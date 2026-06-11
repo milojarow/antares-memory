@@ -34,7 +34,69 @@ if antares_venv_ready; then
     st_ver=$("$ANTARES_VENV_PY" -c 'import sentence_transformers; print(sentence_transformers.__version__)' 2>/dev/null || echo "?")
     ok "python $py_ver, sentence-transformers $st_ver"
 else
-    bad "venv not ready — run /antares-memory:install"
+    bad "venv not ready — run ./install.sh"
+fi
+
+hdr "Deployed system files"
+CLAUDE_SCRIPTS_DIR="$HOME/.claude/scripts"
+missing=0
+for f in "$SCRIPT_DIR"/scripts/* "$SCRIPT_DIR"/scripts/lib/*; do
+    [[ -f "$f" ]] || continue
+    rel="$(basename "$f")"
+    [[ "$f" == */lib/* ]] && rel="lib/$rel"
+    [[ -f "$CLAUDE_SCRIPTS_DIR/$rel" ]] || { bad "missing: $CLAUDE_SCRIPTS_DIR/$rel"; missing=1; }
+done
+(( missing == 0 )) && ok "all scripts deployed at $CLAUDE_SCRIPTS_DIR (incl. lib/)"
+missing=0
+for f in "$SCRIPT_DIR"/agents-sdk/*.mjs; do
+    [[ -f "$HOME/.claude/agents-sdk/$(basename "$f")" ]] || { bad "missing lobo: ~/.claude/agents-sdk/$(basename "$f")"; missing=1; }
+done
+(( missing == 0 )) && ok "all 4 lobos deployed at ~/.claude/agents-sdk/"
+sdk_link="$HOME/.claude/agents-sdk/node_modules"
+if [[ -e "$sdk_link/@anthropic-ai/claude-agent-sdk/package.json" ]]; then
+    ok "lobos SDK resolves at ~/.claude/agents-sdk/"
+else
+    bad "lobos SDK not resolving — run ./install.sh"
+fi
+for a in memory-router memory-recall; do
+    [[ -f "$HOME/.claude/agents/$a.md" ]] && ok "agent $a deployed" || bad "agent $a missing"
+done
+
+hdr "Hooks in ~/.claude/settings.json"
+if [[ -f "$HOME/.claude/settings.json" ]]; then
+    # Exact-command check against the same 8 entries install.sh wires — a fuzzy
+    # substring count would let a user's own memory-* hooks mask missing ones.
+    expected=(
+        "bash $CLAUDE_SCRIPTS_DIR/memory-journal-init.sh"
+        "bash $CLAUDE_SCRIPTS_DIR/memory-reindex.sh"
+        "bash $CLAUDE_SCRIPTS_DIR/memory-search-hook.sh"
+        "bash $CLAUDE_SCRIPTS_DIR/memory-chronicle-launch.sh"
+        "bash $CLAUDE_SCRIPTS_DIR/memory-gardener-launch.sh"
+        "bash $CLAUDE_SCRIPTS_DIR/memory-curator-launch.sh"
+        "bash $CLAUDE_SCRIPTS_DIR/memory-reindex-if-touched.sh"
+    )
+    wired=0
+    hook_missing=0
+    for cmd in "${expected[@]}"; do
+        if jq -e --arg c "$cmd" '[.hooks // {} | to_entries[] | .value[].hooks[]? | select((.command? // "") == $c)] | length > 0' \
+              "$HOME/.claude/settings.json" >/dev/null 2>&1; then
+            wired=$((wired+1))
+        else
+            bad "hook not wired: $cmd"
+            hook_missing=1
+        fi
+    done
+    # chronicle is wired twice (PreCompact + SessionEnd) — verify both.
+    chr=$(jq -r --arg c "bash $CLAUDE_SCRIPTS_DIR/memory-chronicle-launch.sh" \
+        '[.hooks // {} | to_entries[] | .value[].hooks[]? | select((.command? // "") == $c)] | length' \
+        "$HOME/.claude/settings.json" 2>/dev/null || echo 0)
+    if [[ "${chr:-0}" -lt 2 ]]; then
+        bad "chronicle wired ${chr:-0}/2 times (needs PreCompact + SessionEnd)"
+        hook_missing=1
+    fi
+    (( hook_missing == 0 )) && ok "all 8 hook entries wired across 5 events"
+else
+    bad "no ~/.claude/settings.json — run ./install.sh"
 fi
 
 scope_summary() {

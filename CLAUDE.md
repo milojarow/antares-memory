@@ -4,77 +4,62 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
-This is the **antares-memory-skill** repository — a turnkey persistent-memory system for Claude Code, packaged as an installable plugin.
+This is **antares-memory** — a turnkey persistent-memory system for Claude Code, packaged as a **system installer** (NOT a plugin, NOT a skill).
 
-**Repository**: https://github.com/milojarow/antares-memory-skill
+**Repository**: https://github.com/milojarow/antares-memory
+
+It was a Claude Code plugin until 2026-06-10; the plugin packaging was removed deliberately. Infrastructure (hooks, headless lobos, a daemon) needs stable paths and deliberate updates — `${CLAUDE_PLUGIN_ROOT}` versioned cache dirs generated a family of production bugs (stale daemon ExecStart, orphaned SDK node_modules, resumed-session hook skew). Do NOT re-add `.claude-plugin/`, `hooks/hooks.json`, `commands/`, or `skills/` — the lesson is encoded in README's "Why system functionality and not a plugin?".
 
 ## Repository Structure
 
 ```
-antares-memory-skill/
-├── .claude-plugin/                # plugin.json + marketplace.json
+antares-memory/
 ├── CLAUDE.md                      # This file
-├── README.md                      # User-facing pitch + install steps
+├── README.md                      # The product front door — agentic install flow first
 ├── LICENSE                        # MIT
-├── evaluations/                   # GREEN validation scenarios
-├── hooks/hooks.json               # The 4 hooks (UserPromptSubmit, SessionStart, PreCompact, PostToolUse)
-├── scripts/                       # 9 generalized scripts + lib/common.sh + lib/common.py
-├── systemd/                       # Daemon service template
-├── commands/                      # /antares-memory:install|migrate|status|uninstall
-├── install.sh / migrate.sh /
-│   status.sh / uninstall.sh       # Implementations
-└── skills/
-    └── antares-memory/
-        ├── SKILL.md               # Entry point — WHEN-to-use only (CSO)
-        └── reference/             # architecture, taxonomy, writing, tuning, troubleshooting
+├── install.sh                     # THE deliverable: idempotent system-mode installer
+├── uninstall.sh                   # Exact reverse (never touches memory data)
+├── status.sh                      # Diagnostic snapshot (run from the clone)
+├── migrate.sh                     # Legacy storage-layout consolidation helper
+├── systemd/                       # Daemon unit template
+├── scripts/                       # Hook scripts + lobo launchers + prompts + lib/
+├── agents-sdk/                    # The 4 headless lobos (cronista/destiller/gardener/index-curator)
+├── agents/                        # memory-router + memory-recall subagent definitions
+└── docs/                          # The manual: architecture, taxonomy, writing, tuning, troubleshooting
 ```
 
-## The skill
+## Deploy model
 
-### antares-memory
-Documents the memory system: frontmatter taxonomy (`feedback_*` / `reference_*` / `project_*` / `user_*` / `tool_*`), global vs project scope decision rule, dedup discipline, hybrid search tuning (cosine + BM25 weights, threshold), and how to run / troubleshoot the daemon. **Maintenance-only activation (since 0.5.12):** triggers when working ON the pipeline — install/migrate/tuning/troubleshooting/extending — and explicitly NOT on routine memory operations (save/recall/"guarda esto"); those run through the installed hooks + memory-router/memory-recall subagents with zero context cost. The skill is the manual for the machinery, and the machinery runs without the model reading the manual.
+`install.sh` copies into stable system locations and wires everything:
+
+- `scripts/` → `~/.claude/scripts/` (+ `lib/`)
+- `agents-sdk/*.mjs` → `~/.claude/agents-sdk/` with `node_modules` symlinked to the stable SDK install at `~/.local/share/antares-memory/sdk/`
+- `agents/*.md` → `~/.claude/agents/`
+- 5 hook events merged non-destructively into `~/.claude/settings.json`
+- systemd unit ExecStart → `~/.claude/scripts/memory-search-daemon.py` (stable — never a repo or cache path)
+
+Re-running `install.sh` IS the update path. `uninstall.sh` removes exactly what install deployed (by this repo's filenames) and never touches `~/.claude/projects/<slug>/memory/`.
 
 ## Architecture
 
-5 layers (see `skills/antares-memory/reference/architecture.md` for detail):
+5 layers (see `docs/architecture.md` for detail):
 
-1. **Storage** — flat `.md` files at `~/.claude/projects/<slugify(cwd)>/memory/` — Claude Code's native convention; each cwd has its own slug dir, each with its own `MEMORY.md` auto-loaded when cwd matches
-2. **Indexer** — `memory-index.py`: paragraph-aware chunking (120 tokens, overlap 30) + sentence-transformers embeddings + SQLite FTS5, per slug
-3. **Search** — `memory-search.py` + `memory-search-daemon.py`: hybrid cosine (70%) + BM25 (30%), threshold 0.35, UNIX socket; queries the HOME and CURRENT slug DBs
-4. **Auto-inject** — `memory-search-hook.sh` on UserPromptSubmit; `memory-journal-init.sh` on SessionStart (journal lives in HOME slug)
-5. **Auto-capture** — `memory-chronicle-launch.sh` on PreCompact + SessionEnd runs the chronicle pipeline (cronista → journal, destilador → memories) as isolated Agent SDK lobos, writing to HOME or CURRENT per the lesson
+1. **Storage** — flat `.md` files at `~/.claude/projects/<slugify(cwd)>/memory/` — Claude Code's native convention; each cwd has its own slug, each with its own auto-loaded `MEMORY.md`
+2. **Indexer** — `memory-index.py`: paragraph-aware chunking + sentence-transformers embeddings + SQLite FTS5, per slug
+3. **Search** — `memory-search.py` + `memory-search-daemon.py`: hybrid cosine (70%) + BM25 (30%), threshold 0.35, UNIX socket at `$XDG_RUNTIME_DIR/memory-search.sock`
+4. **Auto-inject** — `memory-search-hook.sh` on UserPromptSubmit; `memory-journal-init.sh` on SessionStart
+5. **Auto-capture** — `memory-chronicle-launch.sh` on PreCompact + SessionEnd (cronista → journal, destilador → memories) + gardener (≥24h) + curator (≥7d), all isolated Agent SDK lobos on the subscription
 
-## Persistence layout (after install)
+## Working on this repo
 
-```
-~/.claude/projects/<slug>/memory/            # USER DATA — Claude Code's native location
-├── MEMORY.md                                # Auto-loaded by Claude Code when cwd matches this slug
-├── *.md                                     # Memory files (frontmatter + body)
-├── journal/YYYY-MM-DD.md                    # Daily journal (only in HOME slug)
-└── .memory-index.db                         # SQLite (embeddings + FTS5)
+1. Edit here (the clone is the source; on the dev machines the keeper syncs it with GitHub).
+2. No version files to bump — versioning is the git history (tag if a milestone warrants it).
+3. Commit + push.
+4. Deploying to a machine = `./install.sh` on that machine (or, on the dev machines that pre-date the installer, copy the changed files to `~/.claude/scripts|agents-sdk` and restart the daemon if daemon/search files changed).
 
-~/.local/share/antares-memory/venv/          # Python venv (sentence-transformers, numpy, torch CPU)
-~/.local/state/antares-memory/logs/          # All script logs
-~/.config/systemd/user/antares-memory-daemon.service   # Daemon unit
-$XDG_RUNTIME_DIR/memory-search.sock          # Daemon socket (ephemeral)
-```
+## Validation discipline
 
-`<slug>` = `cwd.replace('/', '-')`. HOME slug = `slugify($HOME)`. Memory files NEVER get overwritten by plugin updates — they live in Claude Code's own data dir, outside the plugin cache.
-
-The plugin cache (`~/.claude/plugins/cache/.../antares-memory-skill/`) holds the scripts. Plugin updates rebuild it. Persistent state lives outside.
-
-## Updating this skill
-
-After any cycle that discovers a new pattern, gotcha, or operator-facing tweak. Keep entries generic — never embed personal names, client identifiers, or private hostnames. The git log is the diary.
-
-When iterating:
-1. Edit in `~/skills-dev/drafts/antares-memory-skill/` (this dir, the source)
-2. Bump version in **both** `.claude-plugin/plugin.json` AND `.claude-plugin/marketplace.json`
-3. Commit + push
-4. Operators get the update on next Claude Code startup (marketplace auto-update)
-
-## Validation discipline (forjador-de-skills pipeline)
-
-- **Privacy scrub** — sweep for personal names, internal hostnames, legacy `~/.claude/projects/<slug>/memory/` paths, and client identifiers before commit. The repo is public; treat it that way.
-- **GREEN validation** — subagent with only this skill loaded must answer scenarios in `evaluations/scenarios.md`.
-- **Idempotence** — `install.sh` must be safe to re-run; running it twice should not break anything.
+- **Privacy scrub** — the repo is public: no personal names, hostnames, client identifiers, or machine-specific paths outside `$HOME`-relative conventions.
+- **Shell hygiene** — `bash -n` every touched script; keep `install.sh`/`uninstall.sh` idempotent and non-clobbering (they must only ever add/remove this repo's own filenames; other files in the target dirs belong to the user).
+- **Fresh-machine empathy** — install.sh must fail loudly and early on missing deps, and every failure message must say what to do next.
+- This repo is NOT a skill: there is no SKILL.md, no CSO description, no GREEN/trigger evals. The docs/ dir is a manual for humans and agents reading the repo, not auto-loaded context.

@@ -47,7 +47,7 @@ For every memory you're about to create:
 
 1. **Grep HOME** by keyword:
    ```bash
-   ls "$(antares_home_memory_dir 2>/dev/null || echo ~/.claude/projects/-$USER/memory)" | grep -i <keyword>
+   ls ~/.claude/projects/$(echo "$HOME" | tr / -)/memory/ | grep -i <keyword>
    ```
    (Or just `ls ~/.claude/projects/<slugify-of-HOME>/memory/`.)
 

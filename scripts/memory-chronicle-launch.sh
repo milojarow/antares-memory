@@ -88,14 +88,12 @@ if (( delta_size < 400 )); then
     exit 0
 fi
 
-# Project detection (same walk-up the extractor used) for the destilador's scope.
-project_root=""
-if [[ -n "$cwd" && "$cwd" != "$HOME"/.claude && "$cwd" != "$HOME"/.claude/* ]]; then
-    probe="$cwd"
-    while [[ -n "$probe" && "$probe" != "/" && "$probe" != "$HOME" ]]; do
-        [[ -d "$probe/.claude/memory" ]] && { project_root="$probe"; break; }
-        probe="$(dirname "$probe")"
-    done
+# Project scope for the destilador: the cwd's slug dir (the same convention the
+# indexer, the search and the gardener resolve — anything else would write
+# memories nothing ever indexes or recalls).
+project_dir=""
+if [[ -n "$cwd" && "$cwd" != "$HOME" && "$cwd" != "$HOME"/.claude && "$cwd" != "$HOME"/.claude/* ]]; then
+    project_dir="$(antares_memory_dir_for "$cwd")"
 fi
 
 home_dir="$(antares_home_memory_dir)"
@@ -126,17 +124,17 @@ build_mem_digest() {
     shopt -u nullglob
 }
 mem_digest="$(build_mem_digest "$home_dir")"
-if [[ -n "$project_root" && -d "$project_root/.claude/memory" ]]; then
+if [[ -n "$project_dir" && -d "$project_dir" ]]; then
     mem_digest="$mem_digest
-$(build_mem_digest "$project_root/.claude/memory")"
+$(build_mem_digest "$project_dir")"
 fi
 
-if [[ -n "$project_root" ]]; then
+if [[ -n "$project_dir" ]]; then
     mem_block="MEMORY DIRS:
   HOME (cross-cutting): $home_dir
-  PROJECT (cwd-specific, rooted at $project_root): $project_root/.claude/memory"
+  PROJECT (cwd-specific slug for $cwd): $project_dir"
 else
-    mem_block="MEMORY DIR (all to HOME — no project under cwd): $home_dir"
+    mem_block="MEMORY DIR (all to HOME — cwd is \$HOME): $home_dir"
 fi
 destilador_task="Distill durable memories from the NEW session activity.
 
@@ -153,8 +151,8 @@ log "LAUNCH chronicle pipeline (background) event=$event session=$session_id"
 (
     trap 'rm -f "$LOCK"' EXIT
     export CLAUDE_HEADLESS=1
-    # Resolve the SDK from the per-version cache (symlink → stable install, survives updates).
-    antares_link_sdk "$SCRIPT_DIR/../agents-sdk" || log "SDK not installed — run /antares-memory:install (lobos fail rc=1)"
+    # Self-heal the SDK symlink in the deploy dir (symlink → stable install, survives updates).
+    antares_link_sdk "$SCRIPT_DIR/../agents-sdk" || log "SDK not installed — run install.sh (lobos fail rc=1)"
 
     # 1. cronista → journal
     c_out=$(printf '%s' "$cronista_task" | timeout "${ANTARES_CRONISTA_TIMEOUT:-420}" \

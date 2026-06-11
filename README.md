@@ -1,71 +1,100 @@
-# antares-memory-skill
+# antares-memory
 
-**Persistent semantic + keyword memory for Claude Code — turnkey.**
+**Persistent semantic + keyword memory for Claude Code — installed as system functionality, not as a plugin.**
 
-## What is this?
+Your Claude writes lessons, gotchas, and decisions to disk as `.md` files; a hybrid search daemon (embeddings + BM25) makes them recallable; relevant memories auto-inject into every prompt; and before context is lost — on compaction *and* on session close — isolated headless subagents (the **lobos**) capture what the session learned. It all runs around the model, through hooks: Claude doesn't need to know how it works for it to work.
 
-A complete memory system for Claude Code that survives across sessions: the assistant writes lessons, gotchas, and decisions to disk as `.md` files; a hybrid search daemon (embeddings + BM25) makes them recallable; relevant memories auto-inject on every prompt; and on context compaction, isolated Agent SDK subagents (cronista → destilador) extract new memories from the transcript before history is lost.
+## Install — tell your Claude
 
-Everything ships in one plugin. After `/antares-memory:install`, you get:
+Paste this into a Claude Code session:
 
-- **Storage** at `~/.claude/projects/<slugify(cwd)>/memory/` — Claude Code's native location. Each cwd has its own slug dir. Memory files use a frontmatter taxonomy (`feedback_*`, `reference_*`, `project_*`, `user_*`, `tool_*`)
-- **Indexer** (`sentence-transformers` multilingual model) chunking files and storing embeddings per-slug in SQLite
-- **Search daemon** — UNIX socket, model pre-warmed in RAM, hybrid cosine + BM25, queries HOME + CURRENT slugs
-- **4 hooks** wired automatically (UserPromptSubmit, SessionStart, PreCompact, PostToolUse)
-- **Journal** (`<HOME-slug>/memory/journal/YYYY-MM-DD.md`) loaded at session start
-- **Zero `@`-imports** in your `~/.claude/CLAUDE.md` — Claude Code already auto-loads `MEMORY.md` from the cwd's slug
+> Clone `https://github.com/milojarow/antares-memory` somewhere permanent (e.g. `~/tools/antares-memory` — the clone stays; updates come through it), read its `README.md`, run `./install.sh`, then run `./status.sh` and report the result. Ask me before installing anything outside the listed locations.
 
-### Why this skill exists
+The installer is a single idempotent script. It will:
 
-- **Cross-session knowledge has to be re-derived every conversation otherwise.** A flat `CLAUDE.md` doesn't scale past a few dozen rules.
-- **Semantic recall beats keyword grep.** Hybrid search (70% cosine + 30% BM25) finds memories you didn't know to look for.
-- **Sessions are captured before the transcript is lost.** A headless pipeline (cronista → destilador) runs on PreCompact *and* SessionEnd — on compaction it grabs the segment still in memory; on close it captures whatever the session never compacted.
-- **Daemon keeps the model warm.** First search after install is slow (model load); subsequent searches are sub-100ms.
-- **Slug-based storage mirrors Claude Code's native convention.** `MEMORY.md` auto-loads without any `@`-import — fully transparent for the operator.
+1. Check dependencies (`python3 ≥ 3.10`, `node`, `npm`, `jq`, `socat`, `sqlite3`, `systemctl`, `git`)
+2. Create the memory store at `~/.claude/projects/<HOME-slug>/memory/` and seed its `MEMORY.md`
+3. Build a Python venv and pre-download the embedding model (~400 MB, one time)
+4. Install the Agent SDK once into a stable dir (`~/.local/share/antares-memory/sdk/`)
+5. Deploy the system files: hook scripts → `~/.claude/scripts/`, the 4 headless lobos → `~/.claude/agents-sdk/`, the 2 on-demand subagents → `~/.claude/agents/`
+6. Merge 5 hook events into `~/.claude/settings.json` (non-destructive — your existing hooks are preserved; a timestamped backup is kept)
+7. Install + start the search daemon (systemd user unit pointing at a stable path)
+8. Run the first index pass
 
-## The skill
+Then **restart your Claude Code sessions** (hooks are read at session start) and you're live.
 
-| Skill | Description |
-|-------|-------------|
-| **antares-memory** | When to write a memory, where (HOME vs CURRENT slug), frontmatter taxonomy, tuning the search, troubleshooting the daemon, and operating the `/antares-memory:*` commands |
+**Everything it writes** (so the paste-prompt's boundary is checkable): `~/.claude/scripts/`, `~/.claude/agents-sdk/`, `~/.claude/agents/` (two files), `~/.claude/settings.json` (hook merge + backup), `~/.claude/projects/<HOME-slug>/memory/`, `~/.local/share/antares-memory/` (venv + SDK), `~/.local/state/antares-memory/` (logs, watermarks, backups, deploy manifest), `~/.cache/huggingface/` (the ~400 MB embedding model), `~/.config/systemd/user/antares-memory-daemon.service`. Nothing else, never with sudo.
 
-## Installation
+If a dependency is missing, the installer names all of them at once — install them with your system package manager (that part may need sudo) and re-run `./install.sh`.
 
-Add the marketplace in Claude Code:
+### Manual install
 
-```
-/plugin marketplace add milojarow/antares-memory-skill
+```bash
+git clone https://github.com/milojarow/antares-memory ~/tools/antares-memory
+cd ~/tools/antares-memory
+./install.sh
 ```
 
-Install the plugin:
+### Update
 
-```
-/plugin install antares-memory-skill@antares-memory-skill
-```
-
-Run the one-time setup (creates venv, downloads the embedding model ~400MB, enables systemd daemon, seeds your HOME slug's MEMORY.md):
-
-```
-/antares-memory:install
+```bash
+git -C ~/tools/antares-memory pull && ~/tools/antares-memory/install.sh
 ```
 
-That's it. Open a new session from `$HOME` and `MEMORY.md` is already in context — Claude Code's native cwd-slug convention loads it automatically.
+Re-running the installer **is** the update path: it re-deploys files, re-merges hooks, and restarts the daemon. Nothing else to do.
 
-## Commands
+### Migrating from the old pre-slug layout
 
-| Command | Purpose |
+If you have memories from an older install living directly under `~/.claude/memory/` (the legacy layout), consolidate them into the slug convention:
+
+```bash
+~/tools/antares-memory/migrate.sh            # dry-run: prints the plan
+~/tools/antares-memory/migrate.sh --apply
+```
+
+### Uninstall
+
+```bash
+~/tools/antares-memory/uninstall.sh --yes
+```
+
+Removes hooks, deployed files, daemon, venv, SDK, and state. **Never touches your memory files** — those live in Claude Code's own data dir and are yours.
+
+## What you get
+
+| Piece | What it does |
 |---|---|
-| `/antares-memory:install` | One-time setup: venv, model, daemon, HOME slug dir. Idempotent. |
-| `/antares-memory:status` | Diagnose daemon, indices, hook health for HOME + CURRENT slugs. |
-| `/antares-memory:migrate` | Consolidate stragglers from a non-standard path (legacy v0.1.x `~/.claude/memory/`) into the HOME slug. |
-| `/antares-memory:uninstall` | Remove daemon, venv, dirs. Preserves all memory files. |
+| **Storage** | Flat `.md` files at `~/.claude/projects/<slugify(cwd)>/memory/` — Claude Code's native location. Frontmatter taxonomy: `feedback_*`, `reference_*`, `project_*`, `user_*`, `tool_*` |
+| **Auto-recall** | `UserPromptSubmit` hook injects semantically-relevant memories into every prompt (hybrid 70% cosine + 30% BM25, multilingual model kept warm in RAM by a UNIX-socket daemon) |
+| **cronista** (lobo) | Only piece that reads the transcript. On PreCompact + SessionEnd, appends the new segment (δ, watermark-tracked) to the session journal |
+| **destilador** (lobo) | Reads the cronista's δ and distills durable lessons into memory files, deduping against what exists |
+| **gardener** (lobo) | Every ≥24h: merges duplicate memories and **deletes obsolete ones** (tar backup of the whole store first, last 5 kept under the state dir; `MEMORY.md` is never deleted) |
+| **curator** (lobo) | Every ≥7d: curates `MEMORY.md`, the always-loaded index |
+| **memory-router** (subagent) | On "save this / guarda esto": decides scope (HOME vs project slug) and dedups before writing |
+| **memory-recall** (subagent) | On "did we already…?": episodic recall across memories + journals |
+
+The 4 maintenance lobos run headless (Agent SDK, isolated from your persona/config). With a Claude subscription logged in and no `ANTHROPIC_API_KEY` exported, they bill nothing extra; **if `ANTHROPIC_API_KEY` is in the environment, the SDK uses it and every session close bills the key** (gardener/curator default to opus). The 2 subagents dispatch on demand via the Agent tool.
+
+## Why system functionality and not a plugin?
+
+This project shipped as a Claude Code plugin once, and the plugin packaging itself generated a whole family of production bugs: hooks anchored to `${CLAUDE_PLUGIN_ROOT}` break when resumed sessions hold stale versions; per-version cache dirs orphan the SDK's `node_modules`; a systemd unit pointing into a versioned cache path dies on the next update or prune. Infrastructure needs stable paths and deliberate updates. Skills/plugins are the right vehicle for *knowledge the model loads while acting* — not for *machinery that runs around the model*. So: stable locations, hooks in `settings.json`, updates via `git pull && ./install.sh`, and no skill ever loading into context.
+
+## Docs
+
+- [docs/architecture.md](docs/architecture.md) — the 5 layers, end to end
+- [docs/lobos-agents-sdk.md](docs/lobos-agents-sdk.md) — the headless lobos: models, gates, locks, envelopes
+- [docs/frontmatter-taxonomy.md](docs/frontmatter-taxonomy.md) — memory types and when to use each
+- [docs/writing-memories.md](docs/writing-memories.md) — dedup discipline, scope rules, good vs bad memories
+- [docs/tuning-search.md](docs/tuning-search.md) — weights, thresholds, switching the embedding model
+- [docs/troubleshooting.md](docs/troubleshooting.md) — daemon, FTS5, hooks, recall misses
 
 ## Requirements
 
-- Linux with systemd user instance (or macOS with launchd — daemon falls back to manual `python3 daemon.py &`)
-- `python3 >= 3.10`, `jq`, `socat`, `sqlite3` (with FTS5)
+- Linux with a systemd user instance
+- `python3 >= 3.10`, `node` + `npm`, `jq`, `socat`, `sqlite3` (with FTS5), `git`
 - ~400 MB disk for the multilingual embedding model
 - ~1.5 GB RAM for the daemon (model + index)
+- A Claude subscription for the headless lobos (or accept API-key billing — see the note above the "Why" section)
 
 ## License
 

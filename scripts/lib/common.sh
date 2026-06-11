@@ -9,7 +9,7 @@
 #   ~/.claude/projects/<slugify(cwd)>/memory/   ← auto-loaded MEMORY.md, per cwd
 #   ~/.claude/projects/<slugify($HOME)>/memory/ ← "global" (when cwd == $HOME)
 #
-# The skill mirrors this convention so the operator never needs `@`-imports in
+# antares-memory mirrors this convention so the operator never needs `@`-imports in
 # CLAUDE.md — Claude Code already loads MEMORY.md from the cwd's slug dir.
 #
 # Reads these env vars (with sane defaults):
@@ -28,7 +28,7 @@ export ANTARES_MODEL="${ANTARES_MODEL:-paraphrase-multilingual-MiniLM-L12-v2}"
 export ANTARES_VENV_PY="$ANTARES_VENV/bin/python3"
 
 # Stable home for the Agent SDK's node_modules — installed ONCE (like the venv
-# above), so it survives plugin updates; the per-version plugin cache does not.
+# above), so it survives re-deploys; the deploy dir only carries a symlink to it.
 export ANTARES_SDK_DIR="${ANTARES_SDK_DIR:-$HOME/.local/share/antares-memory/sdk}"
 
 # Root of all slug-based memory dirs.
@@ -63,10 +63,10 @@ antares_venv_ready() {
         && "$ANTARES_VENV_PY" -c "import sentence_transformers" 2>/dev/null
 }
 
-# Make the SDK resolvable from the .mjs lobos living in the (per-version) plugin
-# cache: symlink their agents-sdk/node_modules to the stable install. ESM ignores
+# Make the SDK resolvable from the .mjs lobos living in the
+# deploy dirs: symlink their agents-sdk/node_modules to the stable install. ESM ignores
 # NODE_PATH, so a real node_modules in the resolution path is required — a symlink
-# suffices and is recreated for free after every plugin update. Returns nonzero if
+# suffices and is recreated for free after every re-deploy. Returns nonzero if
 # the stable SDK isn't installed yet (run install.sh / npm ci in $ANTARES_SDK_DIR).
 antares_link_sdk() {
     local sdk_parent="$1"   # the agents-sdk dir that holds the .mjs lobos

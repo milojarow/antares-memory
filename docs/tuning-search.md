@@ -16,7 +16,7 @@
 | Gardener model / effort / timeout | `opus` / `high` / 420s | `ANTARES_GARDENER_MODEL` · `_EFFORT` · `_TIMEOUT` |
 | Curator model / effort / timeout | `opus` / `high` / 420s | `ANTARES_CURATOR_MODEL` · `_EFFORT` · `_TIMEOUT` |
 
-**Env vars vs hook constants** — env vars are set at the systemd unit level (for daemon) or in `~/.config/environment.d/*.conf` (for hooks). Hook constants (threshold, top-k for the auto-inject hook) live in `scripts/memory-search-hook.sh` — editing them is fine but the change is in the plugin cache and gets reverted on plugin update. For durable changes, fork the plugin or set the constant via a wrapper script in the operator's `~/.claude/settings.json`.
+**Env vars vs hook constants** — env vars are set at the systemd unit level (for daemon) or in `~/.config/environment.d/*.conf` (for hooks). Hook constants (threshold, top-k for the auto-inject hook) live in `scripts/memory-search-hook.sh`. Edit the DEPLOYED copy (`~/.claude/scripts/memory-search-hook.sh`) for a quick local change — but a re-install overwrites it, so for a durable change edit it in your repo clone and re-run `./install.sh`.
 
 ## When to lower the threshold
 
@@ -24,14 +24,14 @@ The `UserPromptSubmit` hook uses `0.35` by default. If you find relevant memorie
 
 ```bash
 # Try a lower threshold from the CLI to confirm the memory ranks
-"$ANTARES_VENV_PY" "${CLAUDE_PLUGIN_ROOT}/scripts/memory-search.py" \
+"$ANTARES_VENV_PY" "$HOME/.claude/scripts/memory-search.py" \
     "your test query" --threshold 0.2
 ```
 
 If the memory shows up at `0.2` but not `0.35`, your memory's content doesn't lexically/semantically match the prompt strongly enough. Options (cheapest first):
 
 1. **Rewrite the memory's `description`** to use words the operator naturally uses when the topic comes up. Cheapest and most durable.
-2. **Lower the threshold globally** — edit `scripts/memory-search-hook.sh`, find `threshold:0.35` in the `jq` request, change to your value. Note: plugin updates overwrite this. Be careful: too low = noise. There is no env var for this yet — if you want one, file an issue.
+2. **Lower the threshold globally** — edit `scripts/memory-search-hook.sh`, find `threshold:0.35` in the `jq` request, change to your value (in the repo clone + re-install, so it sticks). Be careful: too low = noise. There is no env var for this yet — if you want one, file an issue.
 3. **Add to `MEMORY.md`** if it should be always-loaded regardless of similarity. See [architecture.md → MEMORY.md loading](architecture.md#how-memory-md-gets-loaded) for how this layer works.
 
 ## When to raise the threshold
@@ -69,7 +69,7 @@ To swap:
 3. Restart the daemon: `systemctl --user restart antares-memory-daemon`.
 4. Trigger a full reindex of HOME (other slugs will reindex on next session-start in their cwd):
    ```bash
-   "$ANTARES_VENV_PY" "${CLAUDE_PLUGIN_ROOT}/scripts/memory-index.py" --scope home
+   "$ANTARES_VENV_PY" "$HOME/.claude/scripts/memory-index.py" --scope home
    ```
 5. If the new model's max-seq-length is different from 128, edit `TARGET_TOKENS` in `memory-index.py` to stay under the new limit (e.g., 240 for a 256-token model).
 
@@ -95,7 +95,7 @@ To change for the hook, edit `scripts/memory-search-hook.sh` (the `top_k:5` lite
 
 ```bash
 # Direct CLI query — no daemon, full output
-"$ANTARES_VENV_PY" "${CLAUDE_PLUGIN_ROOT}/scripts/memory-search.py" \
+"$ANTARES_VENV_PY" "$HOME/.claude/scripts/memory-search.py" \
     "your query" \
     --threshold 0.3 \
     --vector-weight 0.6 \
