@@ -72,6 +72,7 @@ Removes hooks, deployed files, daemon, venv, SDK, and state. **Never touches you
 | **curator** (lobo) | Every ≥7d: curates `MEMORY.md`, the always-loaded index |
 | **memory-router** (subagent) | On "save this / guarda esto": decides scope (HOME vs project slug) and dedups before writing |
 | **memory-recall** (subagent) | On "did we already…?": episodic recall across memories + journals |
+| **Scope guard** | `PreToolUse` hook on Write/Edit: when the model writes a PROJECT-scoped memory, injects a reminder that scope is decided per FACT (a cross-cutting lesson goes to the HOME/global store, never buried in a project file by append/enrich inheritance) |
 
 The 4 maintenance lobos run headless (Agent SDK, isolated from your persona/config). With a Claude subscription logged in and no `ANTHROPIC_API_KEY` exported, they bill nothing extra; **if `ANTHROPIC_API_KEY` is in the environment, the SDK uses it and every session close bills the key** (gardener/curator default to opus). The 2 subagents dispatch on demand via the Agent tool.
 

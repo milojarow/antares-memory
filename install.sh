@@ -7,7 +7,7 @@
 #   ~/.claude/scripts/       the hook scripts + prompts + lib/
 #   ~/.claude/agents-sdk/    the 4 headless lobos (Agent SDK)
 #   ~/.claude/agents/        memory-router + memory-recall subagents
-#   ~/.claude/settings.json  the 5 hook events (merged, non-destructive)
+#   ~/.claude/settings.json  the 6 hook events (merged, non-destructive)
 #   ~/.config/systemd/user/  the search-daemon unit (stable path)
 #
 # Storage model: Claude Code's native slug convention. Memories live at
@@ -230,6 +230,7 @@ WANTED = {
                                 entry("memory-gardener-launch.sh", 10),
                                 entry("memory-curator-launch.sh", 10)]),
     "PostToolUse":      ("Write|Edit|MultiEdit", [entry("memory-reindex-if-touched.sh", 5)]),
+    "PreToolUse":       ("Write|Edit", [entry("memory-scope-guard.sh", 5)]),
 }
 
 wanted_cmds = {h["command"] for _, hs in WANTED.values() for h in hs}
@@ -264,7 +265,7 @@ out = json.dumps(settings, indent=2) + "\n"
 json.loads(out)  # self-validation before touching the file
 settings_path.parent.mkdir(parents=True, exist_ok=True)
 settings_path.write_text(out)
-print("    merged 8 hook entries across 5 events (existing hooks preserved)")
+print("    merged 9 hook entries across 6 events (existing hooks preserved)")
 PY
 then
     die "could not wire hooks into $SETTINGS_JSON — see the message above; nothing else was changed"

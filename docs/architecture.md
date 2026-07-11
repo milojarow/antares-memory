@@ -154,6 +154,30 @@ If the daemon is down or returns no hits, emits `{}` — no context injected, us
 
 The journal lives in the HOME slug only — one journal store regardless of cwd. (`MEMORY.md` is per slug; the journal is global.)
 
+### PreToolUse — the scope guard
+
+`scripts/memory-scope-guard.sh` runs before every `Write`/`Edit`. If the target
+path is a PROJECT-scoped memory file (any `~/.claude/projects/<slug>/memory/`
+that is not the global store, or a legacy repo-level `.claude/memory/`), it
+injects a reminder as `additionalContext`: **scope is decided per FACT, never
+inherited from the file being edited**. Appending a cross-cutting lesson to an
+existing project memory silently buries it where no other cwd's session will
+ever see it — the guard forces that decision at write time, when the writing
+session still holds the fact's full context.
+
+Writes into the global store (`antares_home_memory_dir` — the HOME slug, or
+`ANTARES_GLOBAL_MEMORY_DIR` where overridden) pass silently: they already are
+the recommended destination.
+
+Deliberately a deterministic bash reflex, not a lobo: it fires on every
+Write/Edit, must cost ~nothing, and a headless model call per tool use is the
+cascade anti-pattern. The judgment ("is this fact transversal?") stays with the
+in-session model; the guard only guarantees the question gets asked. The same
+per-fact rule is encoded in the destilador's policy (`memory-distiller-prompt.txt`
+§ Scope) so the nightly pipeline can't bury cross-cutting lessons via enrich
+either — the lobos run isolated and never see user hooks, so their prompt IS
+their guard.
+
 ## 5. Auto-capture — the chronicle pipeline
 
 `scripts/memory-chronicle-launch.sh` runs on BOTH `PreCompact` and `SessionEnd`

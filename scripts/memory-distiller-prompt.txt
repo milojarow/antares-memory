@@ -23,6 +23,7 @@ near-duplicate of an existing memory, of the journal, or of something a prior ru
 
 # Scope
 Cross-cutting lesson (applies across cwds) → HOME slug. cwd-specific → CURRENT slug. When in doubt → HOME.
+Scope is decided PER FACT, never inherited from a file: if a cross-cutting lesson happens to match an existing cwd-specific memory in the digest, do NOT bury the lesson there via enrich — write (or enrich) the HOME memory instead, and leave the cwd memory holding only the local detail or a pointer. Transversality tripwires in a candidate: "any future app/project", platform/service-wide behavior or policy (Google Play, Vercel, Meta, an API, an OS), anything that would matter in an unrelated repo.
 
 # Hard rules
 - Filename prefix MUST match the frontmatter `type` (feedback_/reference_/project_/tool_/user_).
