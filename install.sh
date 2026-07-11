@@ -49,10 +49,19 @@ if [[ "$SCRIPT_DIR" == "$CLAUDE_SCRIPTS_DIR" || "$SCRIPT_DIR" == "$HOME/.claude"
     die "Run the installer from the cloned repo, not from a deploy location."
 fi
 
+# Single-instance lock: two concurrent installs race on the venv (two pips in
+# one tree), the deploy dir, and settings.json. Held on an fd for the whole
+# run; released automatically on any exit.
+mkdir -p "$ANTARES_STATE"
+exec 9>"$ANTARES_STATE/install.lock"
+if ! flock -n 9; then
+    die "another install.sh is already running (lock: $ANTARES_STATE/install.lock) — wait for it to finish"
+fi
+
 # ─── 1/8 Dependency check ─────────────────────────────────────────────────────
 say "1/8  Checking dependencies"
 missing=()
-for cmd in python3 jq socat sqlite3 systemctl node npm git; do
+for cmd in python3 jq socat sqlite3 systemctl node npm git flock; do
     command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
 done
 if (( ${#missing[@]} > 0 )); then
@@ -264,7 +273,11 @@ for event, (matcher, wanted_hooks) in WANTED.items():
 out = json.dumps(settings, indent=2) + "\n"
 json.loads(out)  # self-validation before touching the file
 settings_path.parent.mkdir(parents=True, exist_ok=True)
-settings_path.write_text(out)
+# Atomic replace: a truncate-then-write window can leave broken JSON on a
+# crash, and a broken settings.json silently disables EVERY hook.
+tmp = settings_path.with_name(settings_path.name + ".tmp")
+tmp.write_text(out)
+os.replace(tmp, settings_path)
 print("    merged 9 hook entries across 6 events (existing hooks preserved)")
 PY
 then
@@ -277,6 +290,18 @@ say "7/8  Installing the search-daemon unit"
 UNIT_DIR="$HOME/.config/systemd/user"
 UNIT_FILE="$UNIT_DIR/antares-memory-daemon.service"
 mkdir -p "$UNIT_DIR"
+
+# Migrate away from the pre-rename unit: the legacy daemon binds the SAME
+# socket name, so leaving both installed means two daemons racing one socket.
+LEGACY_UNIT="memory-search-daemon.service"
+if [[ -f "$UNIT_DIR/$LEGACY_UNIT" ]] || { (( HAVE_USER_SYSTEMD )) && systemctl --user list-unit-files "$LEGACY_UNIT" 2>/dev/null | grep -q "^$LEGACY_UNIT"; }; then
+    warn "legacy unit $LEGACY_UNIT found — replacing it with antares-memory-daemon.service"
+    if (( HAVE_USER_SYSTEMD )); then
+        systemctl --user disable --now "$LEGACY_UNIT" 2>/dev/null || true
+    fi
+    rm -f "$UNIT_DIR/$LEGACY_UNIT"
+    ok "legacy unit stopped, disabled, and removed"
+fi
 
 # ExecStart points at the DEPLOYED copy — a stable path that survives repo
 # moves and updates (re-running this installer refreshes the deployed copy
