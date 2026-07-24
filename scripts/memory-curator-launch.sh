@@ -40,11 +40,12 @@ if [[ -f "$STAMP" ]]; then
     fi
 fi
 
-# Lock: one curator at a time.
-if ! ( set -o noclobber; echo $$ > "$LOCK" ) 2>/dev/null; then
-    log "SKIP lock held (pid=$(cat "$LOCK" 2>/dev/null || echo ?))"
-    exit 0
-fi
+# Lock: one curator at a time. Acquired with flock INSIDE the background subshell
+# (see below), never as a lock FILE here: a pid-in-a-file lock is only released by
+# a trap, so a lobo killed hard (SIGKILL, OOM, power loss) leaves the file behind
+# and every later session SKIPs forever — silently, since a wedged lobo looks
+# exactly like a busy one in the log. The kernel releases an flock unconditionally.
+# Same pattern as skill-keeper-launch.sh.
 
 home_dir="$(antares_home_memory_dir)"
 mem_index="$home_dir/MEMORY.md"
@@ -52,17 +53,8 @@ changelog="$home_dir/.index-changelog.md"
 today=$(date +%Y-%m-%d)
 
 # Digest: filename + frontmatter description of every memory (NOT bodies).
-digest=""
-shopt -s nullglob
-for f in "$home_dir"/*.md; do
-    b=$(basename "$f")
-    [[ "$b" == "MEMORY.md" ]] && continue
-    d=$(grep -m1 '^description:' "$f" 2>/dev/null \
-        | sed -E 's/^description:[[:space:]]*//; s/^"//; s/"$//')
-    [[ -z "$d" ]] && d="(no description)"
-    digest+="- ${b}: ${d}"$'\n'
-done
-shopt -u nullglob
+# Filenames as labels — the curator writes index entries, it doesn't touch files.
+digest="$(antares_build_digest "$home_dir")"
 n_mem=$(printf '%s' "$digest" | grep -c '^- ' || true)
 
 index_body=$(cat "$mem_index" 2>/dev/null || echo "(MEMORY.md absent)")
@@ -83,7 +75,7 @@ Apply promotions/demotions directly to $mem_index per your policy (conservative 
 
 log "LAUNCH index-curator (background) cwd=$cwd memories=$n_mem model=${ANTARES_CURATOR_MODEL:-opus}"
 (
-    trap 'rm -f "$LOCK"' EXIT
+    flock -n 9 || { log "SKIP lock held"; exit 0; }
     export CLAUDE_HEADLESS=1
     antares_link_sdk "$SCRIPT_DIR/../agents-sdk" || log "SDK not installed — run install.sh (lobo fails rc=1)"
     # Backup MEMORY.md before the curator can touch it (always-on file → revertible).
@@ -100,7 +92,7 @@ log "LAUNCH index-curator (background) cwd=$cwd memories=$n_mem model=${ANTARES_
     # Stamp the gate ONLY on success — a failed run (rc!=0) must NOT block the 7d gate; retry next close.
     if (( rc == 0 )); then echo "$now" > "$STAMP"; else log "curator rc=$rc — gate NOT stamped, retries next close"; fi
     log "DONE rc=$rc result=$result"
-) >/dev/null 2>&1 &
+) 9>>"$LOCK" >/dev/null 2>&1 &
 disown
 
 exit 0

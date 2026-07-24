@@ -75,6 +75,43 @@ antares_link_sdk() {
     ln -sfn "$ANTARES_SDK_DIR/node_modules" "$sdk_parent/node_modules" 2>/dev/null
 }
 
+# Digest of a memory dir — one "- <label>: <description>" line per memory
+# (frontmatter only, never bodies). MEMORY.md is excluded; a file with no
+# description line falls back to "(no description)".
+# Usage: antares_build_digest <dir> [name|path]   (label defaults to basename)
+#
+# One awk pass, deliberately. The per-file shape this replaces spawned
+# basename+grep+sed for EVERY memory — at a few hundred memories that is
+# thousands of processes, and it grows with the base. SessionEnd hooks get a
+# much smaller time budget than other events (Claude Code defaults them to
+# 1.5 s unless the hook declares a `timeout`), so a digest that drifts into
+# seconds gets the whole launcher cancelled before it can dispatch its lobo.
+antares_build_digest() {
+    local dir="$1" mode="${2:-name}" files=()
+    shopt -s nullglob
+    files=( "$dir"/*.md )
+    shopt -u nullglob
+    (( ${#files[@]} )) || return 0      # no files: never let awk fall back to stdin
+    awk -v mode="$mode" '
+        FNR == 1 {
+            found = 0
+            n = split(FILENAME, p, "/"); base = p[n]
+            skip = (base == "MEMORY.md")
+            label = (mode == "path") ? FILENAME : base
+        }
+        skip { nextfile }
+        /^description:/ && !found {
+            found = 1
+            line = $0
+            sub(/^description:[[:space:]]*/, "", line)
+            sub(/^"/, "", line); sub(/"$/, "", line)
+            print "- " label ": " line
+            nextfile
+        }
+        ENDFILE { if (!found && !skip) print "- " label ": (no description)" }
+    ' "${files[@]}"
+}
+
 # Stable log helper. Usage: antares_log <file> <msg...>
 antares_log() {
     local log_file="$ANTARES_STATE/logs/$1"

@@ -43,29 +43,22 @@ if [[ -f "$STAMP" ]]; then
     fi
 fi
 
-# Lock: one gardener at a time.
-if ! ( set -o noclobber; echo $$ > "$LOCK" ) 2>/dev/null; then
-    log "SKIP lock held (pid=$(cat "$LOCK" 2>/dev/null || echo ?))"
-    exit 0
-fi
+# Lock: one gardener at a time. Acquired with flock INSIDE the background subshell
+# (see below), never as a lock FILE here: a pid-in-a-file lock is only released by
+# a trap, so a lobo killed hard (SIGKILL, OOM, power loss) leaves the file behind
+# and every later session SKIPs forever — silently, since a wedged lobo looks
+# exactly like a busy one in the log. The kernel releases an flock unconditionally.
+# Same pattern as skill-keeper-launch.sh.
 
 home_dir="$(antares_home_memory_dir)"
 current_dir="$(antares_memory_dir_for "$cwd")"
 changelog="$home_dir/.gardener-changelog.md"
 today=$(date +%Y-%m-%d)
 
+# Full paths as labels — the gardener acts on files (merges, deletion list).
+# Body lives in lib/common.sh: one awk pass instead of ~2 processes per memory.
 build_digest() {
-    local dir="$1" f b d
-    shopt -s nullglob
-    for f in "$dir"/*.md; do
-        b=$(basename "$f")
-        [[ "$b" == "MEMORY.md" ]] && continue
-        d=$(grep -m1 '^description:' "$f" 2>/dev/null \
-            | sed -E 's/^description:[[:space:]]*//; s/^"//; s/"$//')
-        [[ -z "$d" ]] && d="(no description)"
-        printf -- '- %s: %s\n' "$f" "$d"
-    done
-    shopt -u nullglob
+    antares_build_digest "$1" path
 }
 
 digest="$(build_digest "$home_dir")"
@@ -91,7 +84,7 @@ Merge near-duplicates into the best survivor (Edit it). Write the COMPLETE list 
 
 log "LAUNCH gardener (background) cwd=$cwd memories=$n_mem model=${ANTARES_GARDENER_MODEL:-opus}"
 (
-    trap 'rm -f "$LOCK"' EXIT
+    flock -n 9 || { log "SKIP lock held"; exit 0; }
     export CLAUDE_HEADLESS=1
     antares_link_sdk "$SCRIPT_DIR/../agents-sdk" || log "SDK not installed — run install.sh (lobo fails rc=1)"
 
@@ -131,7 +124,7 @@ log "LAUNCH gardener (background) cwd=$cwd memories=$n_mem model=${ANTARES_GARDE
     if (( deleted > 0 )); then
         bash "$SCRIPT_DIR/memory-reindex.sh" >/dev/null 2>&1 || true
     fi
-) >/dev/null 2>&1 &
+) 9>>"$LOCK" >/dev/null 2>&1 &
 disown
 
 exit 0
