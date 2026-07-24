@@ -154,6 +154,15 @@ If the daemon is down or returns no hits, emits `{}` — no context injected, us
 
 The journal lives in the HOME slug only — one journal store regardless of cwd. (`MEMORY.md` is per slug; the journal is global.)
 
+`scripts/memory-elon-musk-launch.sh` — the **elon-musk** lobo — also runs on session start: it commits the memory store to git and pushes it. It is the only component that talks to a remote; everything else writes locally and stops.
+
+- **Why it exists:** nothing ever backed the store up. An audit on one install found 51 memories that had never entered git — one disk, no copy. The index is rebuildable from the `.md` files; the `.md` files are not rebuildable from anything.
+- **One repo per machine.** It pushes wherever `~/.claude` already points, so the remote is a property of that clone. Memory stores are per-machine by design; pointing two machines at one repo would make their histories fight.
+- **Deterministic bash, no model call** — committing files has no judgment in it, and a headless agent here would spend a model call per session start and add a hallucination surface to a git operation.
+- **SessionStart, not SessionEnd:** the capture lobos are fire-and-forget at close and keep writing for a minute or two afterward. Backing up then would snapshot half-written files; by the next start everything has settled.
+- **Scope:** stages only the memory paths, never `git add -A` — the same repo holds operator-authored files (persona, settings) that are committed with intent.
+- **Diverged remote:** logged and left alone. It never pulls, rebases or forces — a diverged remote means another machine wrote too, and reconciling that is the operator's call.
+
 ### PreToolUse — the scope guard
 
 `scripts/memory-scope-guard.sh` runs before every `Write`/`Edit`. If the target
@@ -212,7 +221,8 @@ persona bias) and a capped `maxTurns`. Knobs: `ANTARES_CRONISTA_*` / `ANTARES_DI
 | Two PostToolUse reindexes racing | The indexer is idempotent — only re-embeds files with mtime > stored. Last write wins on the chunks table (DELETE + INSERT per file). |
 | Daemon lock during reindex | Daemon opens DB read-only — no lock contention. |
 | Re-entry from headless sub-claude | `CLAUDE_HEADLESS=1` is set; every hook checks it and exits silently. |
-| Concurrent chronicle runs (a PreCompact + SessionEnd near-collision) | per-session `noclobber` lock file; a run skips if one for that session is already in flight. |
+| Concurrent chronicle runs (a PreCompact + SessionEnd near-collision) | per-session `noclobber` lock file; a run skips if one for that session is already in flight. Scoped to one session id, so a leftover file can only ever block re-chronicling that one session. |
+| Concurrent gardener / curator / elon-musk runs (several sessions closing at once) | `flock -n` on fd 9, taken inside the background subshell. **Not** a pid-in-a-file lock: that is only released by a `trap … EXIT`, so a lobo killed hard (SIGKILL, OOM, power loss) leaves the file behind and every later session skips forever — silently, since a wedged lobo logs exactly like a busy one. This bit a real install: a curator sat out 259 consecutive closes over ~7 weeks. The kernel releases an `flock` however the process dies. |
 
 ## Failure modes (designed)
 
@@ -221,3 +231,11 @@ persona bias) and a capped `maxTurns`. Knobs: `ANTARES_CRONISTA_*` / `ANTARES_DI
 - A capture lobo times out / errors → log says `CRONISTA rc=…` or `DESTILADOR rc=…` (nonzero); partial writes are kept, and the watermark only advances on cronista success, so the delta is retried next run.
 - SQLite locked (very rare) → search returns empty hits, log line, no user-visible failure.
 - Transcript file missing → log says `SKIP no transcript`, exit 0.
+- elon-musk can't push (offline, unreachable remote) → the commits still land locally and the next session start pushes the backlog. A *diverged* remote logs `DIVERGED` and stops.
+
+## Failure modes that are NOT designed — the silent ones
+
+Every mode above announces itself. These do not, and both were found in the field on real installs:
+
+- **A launcher cancelled by its hook budget.** Hooks are killed if they overrun their `timeout`, and the harness may default that budget to something far shorter than other events (Claude Code gives SessionEnd hooks ~1.5 s unless the hook declares its own). Whatever a launcher does in the *foreground* — building a digest, slicing a transcript, reindexing — is spent from that budget, so it can be killed before dispatching its lobo. **Always declare a `timeout` on every hook entry, and keep foreground work far under it.** A digest built with two processes per memory measured 2–10 s at ~530 memories and grew with the store; `antares_build_digest` (one awk pass) does the same work in ~20 ms.
+- **A component that dies and takes the whole system with it, quietly.** A reindexer that never completes leaves search answering from a stale index — the lobos all look healthy, recall just silently gets worse. If a component has no log line, it cannot be diagnosed; give every scheduled component a log, and check freshness (index time, last commit) rather than liveness.

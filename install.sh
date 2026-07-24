@@ -232,7 +232,8 @@ def entry(script, timeout):
 
 WANTED = {
     "SessionStart":     ("startup|resume|clear|compact",
-                         [entry("memory-journal-init.sh", 10), entry("memory-reindex.sh", 60)]),
+                         [entry("memory-journal-init.sh", 10), entry("memory-reindex.sh", 60),
+                          entry("memory-elon-musk-launch.sh", 10)]),
     "UserPromptSubmit": (".*", [entry("memory-search-hook.sh", 5)]),
     "PreCompact":       ("manual|auto", [entry("memory-chronicle-launch.sh", 30)]),
     "SessionEnd":       (None, [entry("memory-chronicle-launch.sh", 30),
