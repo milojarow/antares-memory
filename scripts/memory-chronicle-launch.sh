@@ -112,16 +112,14 @@ Append a dated chronicle of the delta per your policy. If the delta has no real 
 # Digest of existing memories (filename: description) for FAST dedup — same trick the
 # curator/gardener use, so the destilador checks candidates against an inline list
 # instead of Grep+Read over 150 files (that timed it out at 300s).
+# Filenames as labels — the destilador dedups by memory name, it doesn't open files.
+# Body lives in lib/common.sh: one awk pass instead of ~2 processes per memory. This
+# runs in the FOREGROUND of the hook (before the background dispatch below), and this
+# launcher fires on EVERY close with no cadence gate, so its cost is paid every time:
+# the per-file shape it replaces measured seconds at a few hundred memories and grew
+# with the store.
 build_mem_digest() {
-    local dir="$1" f b d
-    shopt -s nullglob
-    for f in "$dir"/*.md; do
-        b=$(basename "$f"); [[ "$b" == "MEMORY.md" ]] && continue
-        d=$(grep -m1 '^description:' "$f" 2>/dev/null | sed -E 's/^description:[[:space:]]*//; s/^"//; s/"$//')
-        [[ -z "$d" ]] && d="(no description)"
-        printf -- '- %s: %s\n' "$b" "$d"
-    done
-    shopt -u nullglob
+    antares_build_digest "$1" name
 }
 mem_digest="$(build_mem_digest "$home_dir")"
 if [[ -n "$project_dir" && -d "$project_dir" ]]; then
