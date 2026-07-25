@@ -40,9 +40,22 @@ from common import (  # noqa: E402
 import numpy as np  # noqa: E402
 
 # Chunk parameters — tuned for paraphrase-multilingual-MiniLM-L12-v2
-# (max_seq_length=128 tokens). Stay under 128 to avoid silent truncation.
-TARGET_TOKENS = 120
-OVERLAP_TOKENS = 30
+# (max_seq_length=128 tokens). Past that window the model simply stops reading,
+# silently. Measured on one install before this was fixed: 962 of 10043 chunks
+# (9.6%) were over the limit, worst at 1053 tokens, and 51041 tokens of real
+# memory text never reached the embedder. FTS5 still indexed that tail, but a
+# keyword-only hit peaks at 0.3 * 1.0 = 0.30 against a 0.35 threshold, so it
+# could never surface on its own.
+#
+# The old values WERE the bug: overlap is carried into the next chunk before the
+# target budget is spent, so a chunk could reach OVERLAP + TARGET = 150 tokens
+# against a 128-token window. The invariant is overlap + target <= window minus
+# the 2 special tokens the tokenizer adds.
+MODEL_MAX_TOKENS = 128
+SPECIAL_TOKENS = 2
+HARD_CAP_TOKENS = MODEL_MAX_TOKENS - SPECIAL_TOKENS   # 126: never exceed this
+TARGET_TOKENS = 96
+OVERLAP_TOKENS = 24                                   # 96 + 24 = 120 <= 126
 
 
 def get_scopes(scope_arg, cwd=None):
@@ -203,7 +216,41 @@ def chunk_text(text, tokenizer, target_tokens=TARGET_TOKENS, overlap_tokens=OVER
     if current_paras:
         chunks.append("\n\n".join(current_paras))
 
-    return chunks
+    return _enforce_token_cap(chunks, tokenizer)
+
+
+def _enforce_token_cap(chunks, tokenizer, hard_cap=HARD_CAP_TOKENS):
+    """Guarantee no chunk exceeds the model's input window.
+
+    The paragraph/line logic above is heuristic: it flushes on paragraph and line
+    boundaries, and one branch appends a line unconditionally, so a single
+    unbroken line longer than the target still produced an oversized chunk (worst
+    observed: 1053 tokens). Rather than prove that logic airtight for every input,
+    enforce the invariant here. Semantics are already lost at that point; what
+    matters is that the text reaches the embedder instead of being cut off by it.
+    """
+    capped = []
+    for chunk in chunks:
+        ids = tokenizer.encode(chunk, add_special_tokens=False)
+        if len(ids) <= hard_cap:
+            capped.append(chunk)
+            continue
+        # Slice on token windows, but VERIFY each piece by re-encoding the text
+        # that will actually be stored. decode(encode(x)) is not length-preserving
+        # — whitespace and subword merges shift on the way back — so a window of
+        # exactly hard_cap tokens can re-encode to hard_cap + 1 and silently blow
+        # the invariant this function exists to guarantee (observed: 127 vs 126).
+        start = 0
+        while start < len(ids):
+            piece_ids = ids[start:start + hard_cap]
+            piece = tokenizer.decode(piece_ids).strip()
+            while piece and len(tokenizer.encode(piece, add_special_tokens=False)) > hard_cap:
+                piece_ids = piece_ids[:-1]
+                piece = tokenizer.decode(piece_ids).strip()
+            if piece:
+                capped.append(piece)
+            start += max(1, len(piece_ids))   # max(1,…) so a pathological input cannot loop forever
+    return capped
 
 
 def _compute_overlap(paragraphs, tokenizer, overlap_tokens):
