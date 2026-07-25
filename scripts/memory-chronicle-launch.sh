@@ -51,8 +51,24 @@ log "watermark=$wm total_lines=$total"
 (( total <= wm )) && { log "SKIP nothing new (total=$total <= wm=$wm)"; exit 0; }
 
 # Lock per session (covers a PreCompact + SessionEnd near-collision).
-if ! ( set -o noclobber; echo $$ > "$LOCK" ) 2>/dev/null; then
-    log "SKIP lock held (pid=$(cat "$LOCK" 2>/dev/null || echo ?))"
+#
+# flock on an inherited FD, NOT a pid-in-a-file: the pid file is only removed by a
+# trap, so a pipeline killed hard (SIGKILL, OOM, power loss) leaves it behind and
+# every later close of THAT session skips forever — silently, because a wedged
+# lobo and a busy one log the same line. Observed in production: one long-running
+# session logged 8 consecutive `SKIP lock held` over 6 days, all naming the same
+# already-dead pid, losing every journal entry in that window, while other
+# sessions were unaffected (this lock is per session_id). It only cleared because
+# the runtime dir is a tmpfs and the machine happened to reboot — luck, not
+# design. The kernel releases an flock unconditionally, however the holder dies.
+#
+# FD 9 is opened here and INHERITED by the background pipeline below, so the lock
+# spans the foreground prep and the lobos, and is released when they finish.
+# Never `rm` the lock file while holding it: a second process would create a new
+# inode and lock that one instead, and both would think they were alone.
+exec 9>>"$LOCK"
+if ! flock -n 9; then
+    log "SKIP lock held (a chronicle for this session is already running)"
     exit 0
 fi
 
@@ -84,7 +100,7 @@ log "delta size=${delta_size}B"
 if (( delta_size < 400 )); then
     log "SKIP delta trivial (${delta_size}B) — advancing watermark, no lobos"
     echo "$total" > "$WM_FILE"
-    rm -f "$LOCK" "$delta"
+    rm -f "$delta"   # NOT the lock file — see the flock note above; exit closes FD 9
     exit 0
 fi
 
@@ -147,7 +163,8 @@ Per your policy: durable lessons/facts only, conservative, never the journal nor
 
 log "LAUNCH chronicle pipeline (background) event=$event session=$session_id"
 (
-    trap 'rm -f "$LOCK"' EXIT
+    # No lock cleanup here: FD 9 is inherited from the parent and the kernel drops
+    # the flock when this subshell exits — including when it is killed.
     export CLAUDE_HEADLESS=1
     # Self-heal the SDK symlink in the deploy dir (symlink → stable install, survives updates).
     antares_link_sdk "$SCRIPT_DIR/../agents-sdk" || log "SDK not installed — run install.sh (lobos fail rc=1)"
