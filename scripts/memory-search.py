@@ -181,9 +181,24 @@ def search_v2(conn, query_embedding, query_text, type_filter, top_n,
         if fts_rows:
             raw = [s for _, s in fts_rows]
             worst, best = max(raw), min(raw)
-            spread = worst - best if worst != best else 1.0
-            for chunk_id, score in fts_rows:
-                bm25_scores[chunk_id] = (worst - score) / spread
+            if worst == best:
+                # No spread to rank by — which is overwhelmingly the case where a
+                # SINGLE chunk matched. Min-max then handed that chunk 0.0, the
+                # exact score given to every chunk that did not match the query at
+                # all: the keyword half of the ranking went silent precisely on the
+                # most discriminating terms, the rare ones that only one memory
+                # contains. Measured on this index: of 9,198 terms over five
+                # letters, 3,965 — 43% — occur in exactly one chunk, and a query
+                # for one of them scored it kw=0.00.
+                #
+                # With every match tied, the faithful answer is that they all match
+                # equally well, not that none of them did.
+                for chunk_id, _ in fts_rows:
+                    bm25_scores[chunk_id] = 1.0
+            else:
+                spread = worst - best
+                for chunk_id, score in fts_rows:
+                    bm25_scores[chunk_id] = (worst - score) / spread
     except sqlite3.OperationalError:
         pass
 
@@ -257,9 +272,14 @@ def search_v1(conn, query_embedding, query_text, type_filter, top_n,
         if fts_rows:
             raw = [s for _, s in fts_rows]
             worst, best = max(raw), min(raw)
-            spread = worst - best if worst != best else 1.0
-            for fp, score in fts_rows:
-                bm25_scores[fp] = (worst - score) / spread
+            if worst == best:
+                # Same collapse as in search_v2 — see the note there.
+                for fp, _ in fts_rows:
+                    bm25_scores[fp] = 1.0
+            else:
+                spread = worst - best
+                for fp, score in fts_rows:
+                    bm25_scores[fp] = (worst - score) / spread
     except sqlite3.OperationalError:
         pass
 
