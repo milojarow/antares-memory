@@ -29,9 +29,36 @@ bien — medido, coseno 0.20 contra el original en una frase en japonés.
    tokenizer devuelve `id=<unk>` pero `.tokens` sigue mostrando el carácter original: `'●' == '●'`
    compara igual mientras los ids son 109993 vs 3. La verificación debe comparar **ids mapeados**.
 
+## El corpus se le PREGUNTA al sistema — no lo adivines con un glob
+El default era `~/.claude/projects/*/memory/**/*.md`, que asume el store global en el slug de
+`$HOME`. En un host con override, ese glob **se salta el store global entero y no falla**:
+encuentra los stores de proyecto, imprime un conteo que se ve razonable, y poda contra una
+fracción. Medido: 253 de 1,121 archivos — el 77% del texto invisible. Ahora el default sale de
+`lib/common.py` (`home_memory_dir()` + `ANTARES_PROJECTS_DIR`); `PRUNE_CORPUS_GLOB` sigue
+existiendo y acepta varios globs separados por `:`.
+
+## El log de queries no está en journald si el unit es nuevo
+La receta de `journalctl` sólo ve lo que el unit actual haya escrito: en un host donde
+`install.sh` acababa de recrear el unit, devolvió **8 líneas**. Las queries no se perdieron —
+cada una es un turno de usuario en los transcripts (`~/.claude/projects/*/*.jsonl`), que van
+meses atrás. Dos trampas al extraerlas:
+- `.message.content` es **string** en un prompt tecleado y **lista** en todo lo demás; tratarlo
+  siempre como lista descarta justo los turnos que importan.
+- `type == "user"` incluye los **resultados de tools** y los **prompts de los propios lobos**
+  (que llevan el digest entero: hasta 578 KB en uno solo). El daemon nunca los ve
+  (`CLAUDE_HEADLESS` corta el hook). La distribución los separa sola: p75 = 537 chars,
+  p90 = 9,269 — cortar en ~4 KB deja las queries reales y tira los payloads.
+
+Vale la pena: en la corrida de referencia, la iteración 1 encontró **466 trozos divergentes y
+525 piezas faltantes**, y prácticamente todas venían de las queries. Sin ese log el punto fijo
+se declara sobre el corpus, se ve limpio, y el top-5 se mueve en producción.
+
 ## Uso
 ```bash
 MARGIN_N=20000 venv/bin/python tools/prune-vocab.py     # margen de piezas latinas por frecuencia
 ```
-Escribe a `~/.local/share/antares-memory/models/mini-es-en/`. Se activa con
-`ANTARES_MODEL=<ruta>` (drop-in de systemd). Rollback: borrar el drop-in y reiniciar.
+Escribe a `~/.local/share/antares-memory/models/mini-es-en/`. Se activa poniendo la ruta en
+**`~/.config/antares-memory/model`** (archivo, no variable: el daemon es hijo de systemd pero
+el INDEXADOR no, y si los dos no resuelven el mismo modelo el índice se escribe con uno y se
+consulta con otro). Después, `./install.sh` para que el unit lo tome. Rollback: borrar el
+archivo y volver a correr `install.sh`.
