@@ -13,7 +13,27 @@ _m    = glob.glob(os.path.expanduser(HF))
 if not _m: sys.exit(f"no encontré el modelo fuente en {HF} — bájalo primero o pasa PRUNE_SRC_GLOB")
 SRC   = _m[0]
 OUT   = os.path.expanduser(os.environ.get('PRUNE_OUT', '~/.local/share/antares-memory/models/mini-es-en'))
-CORPUS= os.environ.get('PRUNE_CORPUS_GLOB', '~/.claude/projects/*/memory/**/*.md')
+
+# El corpus se le PREGUNTA al sistema, no se adivina con un glob.
+#
+# El default era '~/.claude/projects/*/memory/**/*.md', que asume que el store global vive
+# en el slug de $HOME. En una instalación con override (ANTARES_GLOBAL_MEMORY_DIR o el
+# archivo de config) ese glob se salta el store global ENTERO y no falla: encuentra los
+# stores de proyecto, imprime un conteo de archivos que se ve razonable, y poda contra una
+# fracción del corpus. Medido aquí: 253 de 1,121 archivos — el 77% del texto invisible, y
+# el resultado habría sido un vocabulario que no cubre las memorias reales.
+#
+# lib/common.py ya sabe dónde está cada tier; usarlo es la única forma de que esto sea
+# correcto por construcción en cualquier host. PRUNE_CORPUS_GLOB sigue existiendo para
+# forzarlo a mano y ahora acepta varios globs separados por ':'.
+sys.path.insert(0, os.path.expanduser('~/.claude/scripts/lib'))
+try:
+    from common import home_memory_dir, ANTARES_PROJECTS_DIR
+    _default_globs = [os.path.join(home_memory_dir(), '**', '*.md'),
+                      os.path.join(ANTARES_PROJECTS_DIR, '*', 'memory', '**', '*.md')]
+except ImportError:
+    _default_globs = ['~/.claude/projects/*/memory/**/*.md']
+CORPUS= os.environ.get('PRUNE_CORPUS_GLOB', ':'.join(_default_globs))
 # Log de queries reales: texto NUEVO que el corpus no contiene, y es donde la segmentación se
 # rompe. Generarlo con:
 #   journalctl --user -u antares-memory-daemon --since "30 days ago" --no-pager \
@@ -41,8 +61,11 @@ tok = Tokenizer.from_file(SRC + 'tokenizer.json')
 tok.no_truncation(); tok.no_padding()   # tokenizer.json trae truncation max_length=128 horneada:
                                         # sin esto sólo se ven los primeros 128 tokens de cada trozo
 used = set()
-files = sorted(glob.glob(os.path.expanduser(CORPUS), recursive=True))
+files = sorted({f for g in CORPUS.split(':')
+                  for f in glob.glob(os.path.expanduser(g), recursive=True)
+                  if os.path.isfile(f)})
 if not files: sys.exit(f"corpus vacío en {CORPUS}")
+print("corpus:", " + ".join(g.replace(os.path.expanduser('~'), '~') for g in CORPUS.split(':')))
 for f in files:
     t = open(f, encoding='utf-8', errors='replace').read()
     for i in range(0, len(t), 50000):

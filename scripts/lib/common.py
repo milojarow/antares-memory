@@ -22,14 +22,43 @@ import os
 
 HOME = os.path.expanduser("~")
 
+CONF_DIR = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "antares-memory"
+)
+
+
+def _conf_value(name):
+    """First non-comment, non-blank line of CONF_DIR/<name>, or None.
+
+    Machine-local settings live in files, not only in the environment: only the daemon is
+    a child of systemd, so a variable added to environment.d after login reaches it and
+    none of the hooks or lobos. Twin of antares_conf_value() in common.sh — keep in step.
+    """
+    try:
+        with open(os.path.join(CONF_DIR, name), encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    return line
+    except OSError:
+        pass
+    return None
+
+
 ANTARES_VENV = os.environ.get(
     "ANTARES_VENV", os.path.join(HOME, ".local", "share", "antares-memory", "venv")
 )
 ANTARES_STATE = os.environ.get(
     "ANTARES_STATE", os.path.join(HOME, ".local", "state", "antares-memory")
 )
-ANTARES_MODEL = os.environ.get(
-    "ANTARES_MODEL", "paraphrase-multilingual-MiniLM-L12-v2"
+# HuggingFace name or a local directory. A host that pruned the embedding table
+# (tools/prune-vocab.py) points this at the pruned copy — and the INDEXER has to resolve
+# the same value as the daemon, or the index is written with one model and queried with
+# another. Hence a config file rather than only the unit's Environment= line.
+ANTARES_MODEL = (
+    os.environ.get("ANTARES_MODEL")
+    or _conf_value("model")
+    or "paraphrase-multilingual-MiniLM-L12-v2"
 )
 ANTARES_PROJECTS_DIR = os.path.join(HOME, ".claude", "projects")
 
@@ -46,26 +75,6 @@ def slugify(path):
 def memory_dir_for(cwd):
     """Path to the memory dir for a given cwd. Does NOT create."""
     return os.path.join(ANTARES_PROJECTS_DIR, slugify(cwd), "memory")
-
-
-GLOBAL_DIR_CONF = os.path.join(
-    os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"),
-    "antares-memory",
-    "global-memory-dir",
-)
-
-
-def _global_dir_from_conf():
-    """First non-comment, non-blank line of GLOBAL_DIR_CONF, or None."""
-    try:
-        with open(GLOBAL_DIR_CONF, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if line and not line.startswith("#"):
-                    return line
-    except OSError:
-        pass
-    return None
 
 
 def home_memory_dir():
@@ -99,7 +108,7 @@ def home_memory_dir():
     override = os.environ.get("ANTARES_GLOBAL_MEMORY_DIR")
     if override:
         return override
-    return _global_dir_from_conf() or memory_dir_for(HOME)
+    return _conf_value("global-memory-dir") or memory_dir_for(HOME)
 
 
 def db_path_for(memory_dir):

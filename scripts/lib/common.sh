@@ -22,9 +22,39 @@
 #   (per-lobo knobs ANTARES_CRONISTA_*/DISTILLER_*/GARDENER_*/CURATOR_* are read
 #    directly by each lobo's .mjs/launcher with inline defaults — not exported here.)
 
+# antares_conf_value <name> — first non-comment, non-blank line of
+# $XDG_CONFIG_HOME/antares-memory/<name>, or nonzero if there is no such setting.
+#
+# This is how a machine-local choice survives, because an environment variable does not:
+# only the daemon is a child of systemd, so anything set in environment.d after login
+# reaches the daemon and NONE of the hooks or lobos. See the long note on
+# antares_home_memory_dir for the measured case. Its Python twin is _conf_value() in
+# common.py and the two MUST stay in step.
+antares_conf_value() {
+    local conf="${XDG_CONFIG_HOME:-$HOME/.config}/antares-memory/$1" line
+    [[ -r "$conf" ]] || return 1
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [[ -z "$line" || "$line" == '#'* ]] && continue
+        printf '%s' "$line"
+        return 0
+    done < "$conf"
+    return 1
+}
+
 export ANTARES_VENV="${ANTARES_VENV:-$HOME/.local/share/antares-memory/venv}"
 export ANTARES_STATE="${ANTARES_STATE:-$HOME/.local/state/antares-memory}"
-export ANTARES_MODEL="${ANTARES_MODEL:-paraphrase-multilingual-MiniLM-L12-v2}"
+# The model may be a HuggingFace name or a local directory — a host that has pruned the
+# embedding table (tools/prune-vocab.py) points this at the pruned copy. Both the daemon
+# and the INDEXER must agree on it or the index is built with one model and queried with
+# another; that is why it is a config file and not just the unit's Environment= line.
+if [[ -z "${ANTARES_MODEL:-}" ]]; then
+    ANTARES_MODEL="$(antares_conf_value model)" \
+        || ANTARES_MODEL="paraphrase-multilingual-MiniLM-L12-v2"
+fi
+export ANTARES_MODEL
 export ANTARES_VENV_PY="$ANTARES_VENV/bin/python3"
 
 # Stable home for the Agent SDK's node_modules — installed ONCE (like the venv
@@ -92,18 +122,7 @@ antares_home_memory_dir() {
         return
     fi
 
-    local conf="${XDG_CONFIG_HOME:-$HOME/.config}/antares-memory/global-memory-dir"
-    if [[ -r "$conf" ]]; then
-        local line
-        while IFS= read -r line || [[ -n "$line" ]]; do
-            line="${line%$'\r'}"
-            line="${line#"${line%%[![:space:]]*}"}"
-            line="${line%"${line##*[![:space:]]}"}"
-            [[ -z "$line" || "$line" == '#'* ]] && continue
-            printf '%s' "$line"
-            return
-        done < "$conf"
-    fi
+    antares_conf_value global-memory-dir && return
 
     antares_memory_dir_for "$HOME"
 }
