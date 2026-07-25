@@ -258,6 +258,15 @@ log "LAUNCH chronicle pipeline (background) event=$event session=$session_id"
     # Only on success and only with content: a failed run must not leave a partial
     # chronicle behind, and "nothing durable happened" is a legitimate outcome that
     # writes no segment at all.
+    # `captured` gates BOTH the cleanup and the watermark below. The cronista
+    # exiting 0 is not the same thing as the chronicle being safe: it says the lobo
+    # wrote its segment, not that the segment reached the journal. Keying cleanup on
+    # rc alone meant that when the append failed the launcher logged
+    # "segment kept at <path>", deleted that exact file, and advanced the watermark
+    # anyway — the chronicle destroyed, the material it came from skipped forever,
+    # and the only log line pointing at a file removed milliseconds earlier.
+    # Reproduced with a read-only journal.
+    captured=0
     if (( c_rc == 0 )) && [[ -s "$segment" ]]; then
         seg_bytes=$(stat -c %s "$segment" 2>/dev/null || echo 0)
         before=$(stat -c %s "$journal" 2>/dev/null || echo 0)
@@ -265,19 +274,31 @@ log "LAUNCH chronicle pipeline (background) event=$event session=$session_id"
         after=$(stat -c %s "$journal" 2>/dev/null || echo 0)
         if (( after > before )); then
             log "JOURNAL appended ${seg_bytes}B (journal ${before}B -> ${after}B)"
+            captured=1
         else
-            log "JOURNAL APPEND FAILED — segment kept at $segment"
+            # The recovery path is the HELD-BACK WATERMARK, not this file: the next
+            # run re-extracts the same delta and chronicles it again. The segment is
+            # left on disk for inspection only.
+            log "JOURNAL APPEND FAILED (journal ${before}B unchanged) — watermark held back, whole delta retried next run; segment left at $segment"
         fi
     elif (( c_rc == 0 )); then
+        # Nothing to chronicle is a legitimate, complete outcome: there is no
+        # content at risk, so the watermark must advance or this trivial delta is
+        # re-processed on every close forever.
         log "no segment written (delta had nothing to chronicle)"
+        captured=1
     fi
-    [[ -f "$segment" ]] && (( c_rc == 0 )) && rm -f "$segment"
 
-    if (( c_rc == 0 )); then
+    # Remove the segment only once its content is safely in the journal.
+    (( captured == 1 )) && [[ -f "$segment" ]] && rm -f "$segment"
+
+    if (( c_rc == 0 && captured == 1 )); then
         echo "$total" > "$WM_FILE"
         log "watermark advanced -> $total"
-    else
+    elif (( c_rc != 0 )); then
         log "watermark NOT advanced (cronista rc=$c_rc) — delta retried next run"
+    else
+        log "watermark NOT advanced (chronicle never reached the journal) — delta retried next run"
     fi
 
     # 0. Sweep: one delta left behind by a previously failed distillation gets a
