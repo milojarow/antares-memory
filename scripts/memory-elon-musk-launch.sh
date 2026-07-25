@@ -87,6 +87,17 @@ if compgen -G "$ANTARES_STATE"/*.md >/dev/null 2>&1; then
         && cp -u "$ANTARES_STATE"/*.md "$REPO/lobo-state/" 2>/dev/null || true
 fi
 
+# Report memory stores this lobo does NOT cover. Legacy walk-up stores live at
+# <project>/.claude/memory/ — outside this repo, and typically gitignored by the
+# project that hosts them, so nothing backs them up at all. Naming them in the log
+# is the whole point: a backup that silently covers less than you think is the
+# failure this lobo exists to prevent, and it should not commit that failure
+# itself. Cheap (one find, depth-limited) and reported once per run.
+uncovered=$(find "$HOME/projects" -maxdepth 3 -type d -path '*/.claude/memory' 2>/dev/null | head -5)
+if [[ -n "$uncovered" ]]; then
+    log "UNCOVERED walk-up store(s) outside this repo, not backed up here: $(printf '%s ' $uncovered)"
+fi
+
 # Cheap pre-check in the foreground: nothing to do → don't even fork.
 # (SessionStart hooks are not on the 1.5s SessionEnd budget, but this hook
 # declares its own timeout anyway — see the gotcha in `man memories`.)
