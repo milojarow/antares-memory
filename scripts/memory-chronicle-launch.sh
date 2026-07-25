@@ -93,19 +93,45 @@ fi
 # 100KB was too tight: it dropped ~half of such a session. From the next trigger
 # on it's truly incremental (only the new tramo). Already-CLOSED historical
 # sessions never fire a hook, so they're never processed at all.
+#
+# `tail` keeps the MOST RECENT text and drops the oldest — deliberate, but it is a
+# real loss and it used to be invisible. The log printed `delta size=300032B`,
+# which is the cap and not a warning, so a chronicle written from a beheaded
+# segment looked exactly like one written from the whole thing. Measured here: the
+# cap has already fired once in production, on a single long session — repeated
+# cronista failures are NOT required to reach it (deltas: median 17 KB, p90 99 KB,
+# max 300032 B against the 300000 B cap).
+DELTA_MAX_BYTES=${ANTARES_DELTA_MAX_BYTES:-300000}
 delta="$DELTA_DIR/$session_id.md"
+delta_raw="$DELTA_DIR/.$session_id.raw"
 {
-    echo "# Session delta (new since line $wm) — $(date '+%Y-%m-%d %H:%M')"
-    echo ""
     awk -v s=$((wm + 1)) 'NR>=s' "$transcript_path" | jq -r '
         select(.type == "user" or .type == "assistant") |
         .message.content[]? |
         select(.type == "text") |
         "## [" + (.type // "unknown") + "]\n\n" + .text + "\n"
-    ' 2>>"$LOG" | tail -c 300000
+    ' 2>>"$LOG"
+} > "$delta_raw" 2>>"$LOG"
+raw_size=$(stat -c %s "$delta_raw" 2>/dev/null || echo 0)
+{
+    echo "# Session delta (new since line $wm) — $(date '+%Y-%m-%d %H:%M')"
+    echo ""
+    if (( raw_size > DELTA_MAX_BYTES )); then
+        # Tell the lobo too, not just the log: a chronicle that opens mid-thought
+        # should say so rather than read as if that were the start of the session.
+        echo "[NOTE: this segment was truncated to its last ${DELTA_MAX_BYTES} bytes;"
+        echo " $(( raw_size - DELTA_MAX_BYTES )) bytes of EARLIER material are missing from the front.]"
+        echo ""
+    fi
+    tail -c "$DELTA_MAX_BYTES" "$delta_raw"
 } > "$delta" 2>>"$LOG"
+rm -f "$delta_raw"
 delta_size=$(stat -c %s "$delta" 2>/dev/null || echo 0)
-log "delta size=${delta_size}B"
+if (( raw_size > DELTA_MAX_BYTES )); then
+    log "delta size=${delta_size}B TRUNCATED from ${raw_size}B — $(( raw_size - DELTA_MAX_BYTES ))B of the oldest material dropped"
+else
+    log "delta size=${delta_size}B"
+fi
 
 # Gate por sustancia: a near-empty delta (open/close, greeting) isn't worth a lobo.
 # Advance the watermark anyway so it doesn't re-trigger on the same trivial tail.
@@ -133,12 +159,22 @@ mkdir -p "$journal_dir" 2>/dev/null || true
 journal="$journal_dir/session-$session_id.md"
 today=$(date +%Y-%m-%d)
 
-cronista_task="Today is $today. Chronicle the NEW session activity to the journal.
+# The cronista writes a SEGMENT; this launcher appends it. Same split as the
+# gardener's deletions: the lobo produces a proposal in a file of its own and the
+# launcher performs the irreversible part. It is what let the cronista give up
+# Bash — appending to a growing journal was the only thing it needed a shell for,
+# and Read-then-Write-the-whole-file risks losing prior chronicles, which its own
+# policy forbids. Nothing is appended unless the lobo exits 0 AND left content.
+segment="$DELTA_DIR/$session_id.segment.md"
+rm -f "$segment"
+
+cronista_task="Today is $today. Chronicle the NEW session activity.
 
 DELTA (new transcript segment, text only): $delta
-JOURNAL (append your chronicle here; create if absent): $journal
+SEGMENT (write your chronicle HERE, single Write; the launcher appends it): $segment
+JOURNAL (context only — read if useful, never write to it): $journal
 
-Append a dated chronicle of the delta per your policy. If the delta has no real work, write nothing."
+Write a dated chronicle of the delta per your policy. If the delta has no real work, write nothing."
 
 # Digest of existing memories (filename: description) for FAST dedup — same trick the
 # curator/gardener use, so the destilador checks candidates against an inline list
@@ -193,6 +229,25 @@ log "LAUNCH chronicle pipeline (background) event=$event session=$session_id"
 
     # Advance the watermark after the cronista (the journal is the primary capture).
     # If the cronista failed, leave it so the same delta is retried next run.
+    # Append the lobo's segment to the journal — the launcher's job, not the lobo's.
+    # Only on success and only with content: a failed run must not leave a partial
+    # chronicle behind, and "nothing durable happened" is a legitimate outcome that
+    # writes no segment at all.
+    if (( c_rc == 0 )) && [[ -s "$segment" ]]; then
+        seg_bytes=$(stat -c %s "$segment" 2>/dev/null || echo 0)
+        before=$(stat -c %s "$journal" 2>/dev/null || echo 0)
+        { printf '\n'; cat "$segment"; printf '\n'; } >> "$journal" 2>>"$LOG"
+        after=$(stat -c %s "$journal" 2>/dev/null || echo 0)
+        if (( after > before )); then
+            log "JOURNAL appended ${seg_bytes}B (journal ${before}B -> ${after}B)"
+        else
+            log "JOURNAL APPEND FAILED — segment kept at $segment"
+        fi
+    elif (( c_rc == 0 )); then
+        log "no segment written (delta had nothing to chronicle)"
+    fi
+    [[ -f "$segment" ]] && (( c_rc == 0 )) && rm -f "$segment"
+
     if (( c_rc == 0 )); then
         echo "$total" > "$WM_FILE"
         log "watermark advanced -> $total"

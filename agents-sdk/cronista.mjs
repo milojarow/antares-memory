@@ -38,7 +38,15 @@ try {
       // vectors behind a 101-session fork bomb on one install.
       // Bash stays because it is load-bearing: the lobos append to a journal or
       // changelog with `cat >> file <<EOF` rather than re-reading a large file.
-      tools: ["Read", "Write", "Edit", "Bash"],
+      // Bash REMOVED (2026-07-25). This was the last lobo holding a shell, and the
+      // most exposed one: its input is the raw transcript delta, i.e. whatever text
+      // passed through a session. It held Bash for one reason — appending to a
+      // growing journal without rewriting it, which Read+Write cannot do safely.
+      // That reason is gone: it now writes its segment to a fresh file of its own
+      // and the LAUNCHER appends it, the same "the lobo proposes, the launcher
+      // executes" split this system already uses for deletions. No lobo runs with
+      // a shell now.
+      tools: ["Read", "Write", "Edit"],
       allowedTools: ["Read", "Write", "Edit"],  // Read delta; append to the session journal
       permissionMode: "bypassPermissions",
       maxTurns: 15,
