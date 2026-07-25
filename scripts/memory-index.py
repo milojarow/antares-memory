@@ -143,12 +143,25 @@ def migrate_v1_to_v2(conn):
 
 
 def get_md_files(memory_dir):
-    """Find all .md files in memory dir, excluding MEMORY.md index."""
+    """Find the .md files that are MEMORIES — not the machinery's own paperwork.
+
+    Excluded, and why:
+      * MEMORY.md — the always-on index, loaded natively; indexing it would inject
+        the table of contents alongside the things it points at.
+      * dot-prefixed files — the lobos' maintenance changelogs live here
+        (.gardener-changelog.md, .index-changelog.md). They are an audit trail of
+        merges and promotions, not knowledge, and they had 225 chunks in the index
+        on one install: a 50 KB running log of housekeeping, competing with real
+        memories for the 5 hit slots and injected into prompts as if it were
+        something the operator had recorded. Nothing marked them apart, because
+        the only filter was the filename MEMORY.md.
+    """
     files = []
     for root, _dirs, filenames in os.walk(memory_dir):
         for f in filenames:
-            if f.endswith(".md") and f != "MEMORY.md":
-                files.append(os.path.join(root, f))
+            if not f.endswith(".md") or f == "MEMORY.md" or f.startswith("."):
+                continue
+            files.append(os.path.join(root, f))
     return files
 
 

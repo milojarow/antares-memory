@@ -227,6 +227,16 @@ $mem_digest
     fi
 
     # 2. destilador → memories (chained, same delta the cronista just chronicled).
+    #
+    # Only if the cronista actually succeeded. When it failed the watermark was
+    # deliberately held back so the delta is retried next run — but the destilador
+    # ran anyway on that same delta, so the retry distils it a SECOND time, from a
+    # lobo that dedups against a digest of names and cannot see it already wrote
+    # these memories once. Skipping here costs nothing: the whole delta is retried
+    # intact, chronicle and distillation together.
+    if (( c_rc != 0 )); then
+        log "SKIP destilador (cronista rc=$c_rc) — whole delta retried next run"
+    else
     d_out=$(printf '%s' "$destilador_task" | timeout "${ANTARES_DISTILLER_TIMEOUT:-480}" \
         node "$SCRIPT_DIR/../agents-sdk/destiller.mjs" 2>>"$LOG")
     d_rc=$?
@@ -242,6 +252,7 @@ $mem_digest
     if (( d_rc != 0 )); then
         mv -f "$delta" "$delta.retry" 2>/dev/null \
             && log "RETRY-PENDING delta kept for one more attempt: $delta.retry"
+    fi
     fi
 
     # Reindex so the new journal + memories are searchable next session.
