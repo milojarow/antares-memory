@@ -200,6 +200,41 @@ antares_build_digest() {
     ' "${files[@]}"
 }
 
+# Minimized environment for a headless lobo. Usage:
+#     antares_lobo_env "<colon-separated write roots>"
+#     ... | env -i "${ANTARES_LOBO_ENV[@]}" timeout N node <lobo>.mjs
+#
+# The lobos are agents fed untrusted transcript text. Whatever sits in the ambient
+# environment is readable by them and reachable from their own /proc/self/environ.
+# On the install this was found on, Claude Code's `env` block put a live GitHub PAT
+# (ghp_, 40 chars) there — measured, not assumed: a node process launched the way
+# these launchers launch one reported it PRESENT. Combine that with an agent that
+# has file-write tools and an outbound channel already wired (the backup lobo
+# pushes; the search hook pastes memory bodies into every prompt) and the ambient
+# secret is the interesting part of the blast radius.
+#
+# What actually has to survive the cut, verified against what the lobos read:
+# their own ANTARES_* knobs, the write scope, and HOME — auth rides
+# ~/.claude/.credentials.json on disk, NOT an env var, which is why the token can
+# go without taking the subscription with it.
+antares_lobo_env() {
+    local roots="${1:-}" v
+    ANTARES_LOBO_ENV=(
+        HOME="$HOME" PATH="$PATH"
+        USER="${USER:-$(id -un)}" LOGNAME="${LOGNAME:-${USER:-$(id -un)}}"
+        SHELL="${SHELL:-/bin/bash}" TERM="${TERM:-dumb}" LANG="${LANG:-C.UTF-8}"
+        CLAUDE_HEADLESS=1
+        ANTARES_LOBO_WRITE_ROOTS="$roots"
+    )
+    [[ -n "${XDG_RUNTIME_DIR:-}" ]] && ANTARES_LOBO_ENV+=( XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" )
+    for v in ANTARES_CRONISTA_MODEL ANTARES_CRONISTA_EFFORT \
+             ANTARES_DISTILLER_MODEL ANTARES_DISTILLER_EFFORT \
+             ANTARES_GARDENER_MODEL ANTARES_GARDENER_EFFORT \
+             ANTARES_CURATOR_MODEL ANTARES_CURATOR_EFFORT; do
+        [[ -n "${!v:-}" ]] && ANTARES_LOBO_ENV+=( "$v=${!v}" )
+    done
+}
+
 # Stable log helper. Usage: antares_log <file> <msg...>
 antares_log() {
     local log_file="$ANTARES_STATE/logs/$1"

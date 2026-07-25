@@ -109,7 +109,8 @@ log "LAUNCH gardener (background) cwd=$cwd memories=$n_mem model=${ANTARES_GARDE
     fi
     ls -1t "$BACKUP_DIR"/base.*.tar.gz 2>/dev/null | tail -n +6 | xargs -r rm -f  # keep last 5
 
-    out=$(printf '%s' "$task" | ANTARES_LOBO_WRITE_ROOTS="$home_dir${current_dir:+:$current_dir}:$ANTARES_STATE" \
+    antares_lobo_env "$home_dir${current_dir:+:$current_dir}:$ANTARES_STATE"
+    out=$(printf '%s' "$task" | env -i "${ANTARES_LOBO_ENV[@]}" \
         timeout "${ANTARES_GARDENER_TIMEOUT:-420}" \
         node "$SCRIPT_DIR/../agents-sdk/gardener.mjs" 2>>"$LOG")
     rc=$?

@@ -248,7 +248,8 @@ log "LAUNCH chronicle pipeline (background) event=$event session=$session_id"
     # 1. cronista → journal
     # Write scope, per lobo. The cronista only ever writes its own SEGMENT file —
     # the launcher does the journal append — so that is the entire scope it needs.
-    c_out=$(printf '%s' "$cronista_task" | ANTARES_LOBO_WRITE_ROOTS="$DELTA_DIR" \
+    antares_lobo_env "$DELTA_DIR"
+    c_out=$(printf '%s' "$cronista_task" | env -i "${ANTARES_LOBO_ENV[@]}" \
         timeout "${ANTARES_CRONISTA_TIMEOUT:-420}" \
         node "$SCRIPT_DIR/../agents-sdk/cronista.mjs" 2>>"$LOG")
     c_rc=$?
@@ -326,7 +327,8 @@ $mem_block
 EXISTING MEMORIES (filename: description — dedup against THIS inline list, do NOT Grep all files):
 $mem_digest
 "
-        r_out=$(printf '%s' "$r_task" | ANTARES_LOBO_WRITE_ROOTS="$home_dir${project_dir:+:$project_dir}" \
+        antares_lobo_env "$home_dir${project_dir:+:$project_dir}"
+        r_out=$(printf '%s' "$r_task" | env -i "${ANTARES_LOBO_ENV[@]}" \
             timeout "${ANTARES_DISTILLER_TIMEOUT:-480}" \
             node "$SCRIPT_DIR/../agents-sdk/destiller.mjs" 2>>"$LOG")
         r_rc=$?
@@ -345,7 +347,8 @@ $mem_digest
     if (( c_rc != 0 )); then
         log "SKIP destilador (cronista rc=$c_rc) — whole delta retried next run"
     else
-    d_out=$(printf '%s' "$destilador_task" | ANTARES_LOBO_WRITE_ROOTS="$home_dir${project_dir:+:$project_dir}" \
+    antares_lobo_env "$home_dir${project_dir:+:$project_dir}"
+    d_out=$(printf '%s' "$destilador_task" | env -i "${ANTARES_LOBO_ENV[@]}" \
         timeout "${ANTARES_DISTILLER_TIMEOUT:-480}" \
         node "$SCRIPT_DIR/../agents-sdk/destiller.mjs" 2>>"$LOG")
     d_rc=$?
