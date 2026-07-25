@@ -279,7 +279,7 @@ settings_path.parent.mkdir(parents=True, exist_ok=True)
 tmp = settings_path.with_name(settings_path.name + ".tmp")
 tmp.write_text(out)
 os.replace(tmp, settings_path)
-print("    merged 9 hook entries across 6 events (existing hooks preserved)")
+print(f"    merged {sum(len(hs) for _, hs in WANTED.values())} hook entries across {len(WANTED)} events (existing hooks preserved)")
 PY
 then
     die "could not wire hooks into $SETTINGS_JSON — see the message above; nothing else was changed"
