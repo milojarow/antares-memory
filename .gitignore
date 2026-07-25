@@ -8,3 +8,7 @@ agents-sdk/node_modules/
 # OS / editor cruft
 .DS_Store
 *.swp
+
+# Python bytecode from running the lib directly (tests, imports)
+__pycache__/
+*.pyc
