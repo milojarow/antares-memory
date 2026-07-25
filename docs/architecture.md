@@ -56,6 +56,34 @@ Practical difference:
 
 Keep `MEMORY.md` short — it's overhead per prompt. Use it for directives you want enforced unconditionally for that scope; let semantic recall handle the rest.
 
+### Where "global" lives, and the one variable that decides it
+
+The canonical global store is the `$HOME` slug. An install that predates that
+layout can point elsewhere with **`ANTARES_GLOBAL_MEMORY_DIR`**, and both halves
+of the system read it: `lib/common.sh` (`antares_home_memory_dir`) and
+`lib/common.py` (`home_memory_dir`).
+
+They MUST agree. For a period they did not — the shell honoured the override and
+the Python did not — which made `./install.sh` a landmine on the affected
+machine: it would have repointed indexing and search at an empty slug dir while
+the real store, 550+ memories, sat untouched. No error, no missing file, just
+retrieval quietly returning nothing relevant. If you add a third consumer of the
+global path, teach it this variable in the same commit.
+
+Set it in the **systemd user environment**, not a shell rc: the search daemon and
+every hook are children of systemd, not of an interactive shell.
+
+```
+# ~/.config/environment.d/30-antares-memory.conf
+ANTARES_GLOBAL_MEMORY_DIR=/home/you/.claude/memory-jarvis
+```
+
+The override exists so an install can stay on the canonical SCRIPTS while keeping
+a non-canonical STORE. Forking the scripts instead is what produced the worst bug
+this system has had: the write side migrated to slugs, the read side did not, and
+219 project memories were written to a place nothing could ever read them back
+from — for seven weeks, silently.
+
 ## 2. Indexer
 
 `scripts/memory-index.py` — runs in three triggers:

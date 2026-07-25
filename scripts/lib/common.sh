@@ -52,8 +52,23 @@ antares_memory_dir_for() {
     printf '%s/%s/memory' "$ANTARES_PROJECTS_DIR" "$(antares_slugify "$cwd")"
 }
 
-# the "home" memory dir — used as global by convention (cwd=$HOME slug).
+# The GLOBAL memory dir. Defaults to the $HOME slug, which is the canonical
+# layout; ANTARES_GLOBAL_MEMORY_DIR overrides it.
+#
+# The override is not a nicety, it is what lets one install keep a store that
+# predates the slug layout without forking these scripts. Its Python twin in
+# common.py reads the same variable — the two halves MUST agree on where
+# "global" is, and for a while they did not: the shell side had the override and
+# the Python side did not, so an installer run would have repointed indexing and
+# search at an empty slug dir while the real store sat untouched. Every memory
+# still on disk, none of them findable, and no error anywhere.
+#
+# If you add a third consumer, teach it this variable too.
 antares_home_memory_dir() {
+    if [[ -n "${ANTARES_GLOBAL_MEMORY_DIR:-}" ]]; then
+        printf '%s' "$ANTARES_GLOBAL_MEMORY_DIR"
+        return
+    fi
     antares_memory_dir_for "$HOME"
 }
 
