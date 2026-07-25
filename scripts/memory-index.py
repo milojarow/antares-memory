@@ -355,6 +355,22 @@ def index_scope(model, scope_name, memory_dir):
             # the file is ever opened, and that was the failure that still aborted
             # the pass after the read itself had been guarded.
             mtime = os.path.getmtime(filepath)
+
+            # Size gate BEFORE the mtime skip, deliberately. The content gate below
+            # only runs on files the incremental check lets through, so an inert
+            # file ALREADY in the index is never re-examined and its chunks live
+            # forever. Measured after adding that gate on one install: the reindex
+            # ran clean and all 105 stubs were still there, still sweeping the top-5
+            # at 0.825 — same shape as the chunker fix that could not reach chunks
+            # already indexed.
+            #
+            # A file smaller than min_chars BYTES cannot hold min_chars of content
+            # (frontmatter only adds to the byte count), so this is a safe
+            # conservative pre-filter and it costs one stat rather than a read.
+            if os.path.getsize(filepath) < int(os.environ.get("ANTARES_MIN_CONTENT_CHARS", "50")):
+                conn.execute("DELETE FROM memory_chunks WHERE file_path = ?", (filepath,))
+                continue
+
             if not rechunk_all and not needs_update(conn, filepath, mtime):
                 continue
             content, title = extract_content(filepath)
