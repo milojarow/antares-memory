@@ -70,8 +70,6 @@ fi
 n_mem=$(printf '%s' "$digest" | grep -c '^- ' || true)
 prefs_body=$(cat "$PREFS" 2>/dev/null || echo "(no preferences recorded yet — be extra conservative; record what the operator keeps to your memory file.)")
 
-: > "$DELLIST"  # fresh empty deletions list for this run
-
 task="Today is $today. Keep the base clean by ACTING (merge duplicates, remove obsolete). Do NOT leave notes.
 
 == YOUR MEMORY (operator preferences — read FIRST; update at $PREFS) ==
@@ -86,11 +84,29 @@ log "LAUNCH gardener (background) cwd=$cwd memories=$n_mem model=${ANTARES_GARDE
 (
     flock -n 9 || { log "SKIP lock held"; exit 0; }
     export CLAUDE_HEADLESS=1
+
+    # Deletions list truncated INSIDE the lock, not in the launcher's foreground.
+    # The gate is stamped only after a successful run, so a second session closing
+    # while a gardener is in flight still passes it. It used to clear this file
+    # before reaching the lock — wiping the list the running gardener was still
+    # writing into — and then skip on the lock, having already destroyed the other
+    # run's work. The surviving list is short, so the launcher under-deletes: safe
+    # in direction, silent in effect, and the whole pass is wasted.
+    : > "$DELLIST"
     antares_link_sdk "$SCRIPT_DIR/../agents-sdk" || log "SDK not installed — run install.sh (lobo fails rc=1)"
 
     # FULL backup of the base before the gardener can merge/flag anything.
     mkdir -p "$BACKUP_DIR" 2>/dev/null || true
-    tar czf "$BACKUP_DIR/base.$(date +%Y%m%d-%H%M%S).tar.gz" -C "$home_dir" . 2>/dev/null || true
+    stamp=$(date +%Y%m%d-%H%M%S)
+    tar czf "$BACKUP_DIR/base.$stamp.tar.gz" -C "$home_dir" . 2>/dev/null || true
+    # The digest above hands the lobo the per-cwd store as well when cwd != $HOME,
+    # so it can merge and rewrite memories there — but the backup only ever covered
+    # the global store, leaving those edits with no local recovery path. Back up
+    # whatever the lobo was actually shown, not just the part we remembered.
+    if [[ "$current_dir" != "$home_dir" && -d "$current_dir" ]]; then
+        tar czf "$BACKUP_DIR/project-$(basename "$(dirname "$current_dir")").$stamp.tar.gz" \
+            -C "$current_dir" . 2>/dev/null || true
+    fi
     ls -1t "$BACKUP_DIR"/base.*.tar.gz 2>/dev/null | tail -n +6 | xargs -r rm -f  # keep last 5
 
     out=$(printf '%s' "$task" | timeout "${ANTARES_GARDENER_TIMEOUT:-420}" \
@@ -122,7 +138,12 @@ log "LAUNCH gardener (background) cwd=$cwd memories=$n_mem model=${ANTARES_GARDE
 
     # Reindex if the base changed (deleted files must leave the search index).
     if (( deleted > 0 )); then
-        bash "$SCRIPT_DIR/memory-reindex.sh" >/dev/null 2>&1 || true
+        # env -u: this subshell exports CLAUDE_HEADLESS=1 and memory-reindex.sh
+        # guards on exactly that, so the call returned in ~6 ms having indexed
+        # nothing — meaning every file the gardener deleted stayed in the search
+        # index, and searches kept returning hits for memories that no longer
+        # exist. Same dead-call shape as the one in the chronicle launcher.
+        env -u CLAUDE_HEADLESS bash "$SCRIPT_DIR/memory-reindex.sh" >/dev/null 2>&1 || true
     fi
 ) 9>>"$LOCK" >/dev/null 2>&1 &
 disown
