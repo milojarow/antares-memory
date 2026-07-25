@@ -340,18 +340,60 @@ Per your policy: durable lessons/facts only, conservative, never the journal nor
     # pending delta belongs to whichever session failed, and stamping its memories
     # with the current id would quietly corrupt originSessionId — a wrong answer is
     # worse than a missing one.
-    pending=$(ls -1tr "$DELTA_DIR"/*.md.retry 2>/dev/null | head -1)
+    # Runs ONLY when this run's own cronista succeeded. A run whose cronista just
+    # failed is a run with something wrong — SDK, auth, timeout — and spending
+    # another session's one retry attempt inside it burned the attempt on
+    # conditions that had nothing to do with that delta. The sweep used to sit
+    # ABOVE the `c_rc != 0` gate that skips distillation for exactly that reason.
+    pending=""
+    if (( c_rc == 0 )); then
+        candidate=$(ls -1tr "$DELTA_DIR"/*.md.retry 2>/dev/null | head -1)
+        # CLAIM IT ATOMICALLY. The retry queue is global state, but the lock around
+        # this block is per SESSION, so two sessions closing at once both list the
+        # same file and both distil it — duplicate memories from one delta, in
+        # parallel. `mv` is the arbiter: whoever moves it first wins, and the loser's
+        # mv fails because the source no longer exists.
+        if [[ -n "$candidate" ]]; then
+            claimed="$candidate.claimed.$$"
+            if mv "$candidate" "$claimed" 2>/dev/null; then
+                pending="$claimed"
+            else
+                log "RETRY skipped: another run claimed $(basename "$candidate") first"
+            fi
+        fi
+    fi
     if [[ -n "$pending" && -f "$pending" ]]; then
-        r_sid=$(basename "$pending"); r_sid="${r_sid%.md.retry}"
-        log "RETRY distilling session=$r_sid delta=$pending"
+        r_sid=$(basename "$pending"); r_sid="${r_sid%.md.retry.claimed.$$}"
+        # Rebuild the scope from the cwd of the session that PRODUCED this delta,
+        # not from ours. Falls back to the global store when the sidecar is absent
+        # (a delta stranded by an older version), which is the safe direction: a
+        # memory in the global store is findable, one in the wrong project slug is
+        # not.
+        r_cwd=$(cat "$pending.cwd" 2>/dev/null || cat "${pending%.claimed.$$}.cwd" 2>/dev/null || true)
+        r_home="$home_dir"
+        r_project=""
+        if [[ -n "$r_cwd" && "$r_cwd" != "$HOME" && "$r_cwd" != "$HOME"/.claude && "$r_cwd" != "$HOME"/.claude/* ]]; then
+            r_project="$(antares_memory_dir_for "$r_cwd")"
+        fi
+        if [[ -n "$r_project" ]]; then
+            r_mem_block="MEMORY DIRS:
+  HOME (cross-cutting): $r_home
+  PROJECT (cwd-specific slug for $r_cwd): $r_project"
+            r_digest="$(antares_build_digest "$r_home" name)
+$(antares_build_digest "$r_project" name)"
+        else
+            r_mem_block="MEMORY DIR (all to HOME): $r_home"
+            r_digest="$(antares_build_digest "$r_home" name)"
+        fi
+        log "RETRY distilling session=$r_sid delta=$pending scope=${r_project:-home}"
         r_task="Distill durable memories from the NEW session activity.
 
 REAL SESSION ID (use verbatim for each memory's metadata.originSessionId): $r_sid
 DELTA (new transcript segment, text only): $pending
-$mem_block
+$r_mem_block
 
 EXISTING MEMORIES (filename: description — dedup against THIS inline list, do NOT Grep all files):
-$mem_digest
+$r_digest
 "
         antares_lobo_env "$home_dir${project_dir:+:$project_dir}"
         r_out=$(printf '%s' "$r_task" | env -i "${ANTARES_LOBO_ENV[@]}" \
@@ -359,7 +401,17 @@ $mem_digest
             node "$SCRIPT_DIR/../agents-sdk/destiller.mjs" 2>>"$LOG")
         r_rc=$?
         log "RETRY rc=$r_rc result=$(printf '%s' "$r_out" | jq -r '.result // empty' 2>/dev/null | head -c 200)"
-        rm -f "$pending"   # consumed either way: one retry, never a permanent queue
+        # Deleted only when the attempt actually succeeded. On failure it is kept
+        # as .spent — out of the sweep's reach so it can never become a permanent
+        # queue, but still on disk instead of destroyed, because a delta whose
+        # distillation failed twice is exactly the one worth looking at.
+        if (( r_rc == 0 )); then
+            rm -f "$pending" "$pending.cwd" "${pending%.claimed.$$}.cwd" 2>/dev/null
+        else
+            mv -f "$pending" "${pending%.claimed.$$}.spent" 2>/dev/null \
+                && log "RETRY failed rc=$r_rc — kept as $(basename "${pending%.claimed.$$}").spent"
+            rm -f "$pending.cwd" "${pending%.claimed.$$}.cwd" 2>/dev/null
+        fi
     fi
 
     # 2. destilador → memories (chained, same delta the cronista just chronicled).
@@ -388,8 +440,16 @@ $mem_digest
     # 2 errors), each a session's memories silently never written. Kept for exactly
     # one more attempt by the sweep at the top of the next run.
     if (( d_rc != 0 )); then
-        mv -f "$delta" "$delta.retry" 2>/dev/null \
-            && log "RETRY-PENDING delta kept for one more attempt: $delta.retry"
+        if mv -f "$delta" "$delta.retry" 2>/dev/null; then
+            # Persist the cwd alongside it. The sweep that picks this up runs in a
+            # DIFFERENT session, and without this it rebuilt the memory scope from
+            # ITS OWN cwd — writing this session's memories into another project's
+            # slug and deduping them against the wrong set. The original commit
+            # was careful to carry originSessionId across and forgot the
+            # destination, which is the half that decides where the file lands.
+            printf '%s\n' "$cwd" > "$delta.retry.cwd" 2>/dev/null || true
+            log "RETRY-PENDING delta kept for one more attempt: $delta.retry"
+        fi
     fi
     fi
 
