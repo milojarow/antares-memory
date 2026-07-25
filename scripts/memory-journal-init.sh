@@ -33,6 +33,39 @@ fi
 
 context=""
 
+# The cronista's ACTUAL output: journal/session-<id>.md, one per session.
+#
+# This hook only looked at the daily YYYY-MM-DD.md files, and the cronista stopped
+# writing those in favour of per-session journals. Since then it creates the daily
+# file as a ~36-byte stub, the >50-byte content gate rejects it, and the hook
+# returns '{}' on EVERY session start — indistinguishable from "no journal yet",
+# which is why it went unnoticed for two months on one install while 173 session
+# journals piled up beside it, never once injected.
+#
+# The daily file is still honoured below: it remains the documented place to write
+# notes by hand before a compaction. It just is not what the cronista writes.
+#
+# Capped, because injected context is not free.
+MAX_SESSIONS=${ANTARES_JOURNAL_MAX_SESSIONS:-3}
+MAX_SESSION_BYTES=${ANTARES_JOURNAL_MAX_SESSION_BYTES:-12000}
+session_ctx=""
+session_total=0
+if [[ -d "$JOURNAL_DIR" ]]; then
+    while IFS= read -r f; do
+        [[ -f "$f" ]] || continue
+        sz=$(stat -c %s "$f" 2>/dev/null || echo 0)
+        (( sz > 50 )) || continue
+        remaining=$(( MAX_SESSION_BYTES - session_total ))
+        (( remaining > 500 )) || break
+        body=$(head -c "$remaining" "$f")
+        (( sz > remaining )) && body+=$'\n[... truncated for context efficiency ...]'
+        session_ctx+="### $(basename "$f")"$'\n'"$body"$'\n\n'
+        session_total=$(( session_total + ${#body} ))
+    done < <(ls -1t "$JOURNAL_DIR"/session-*.md 2>/dev/null | head -n "$MAX_SESSIONS")
+fi
+[[ -n "$session_ctx" ]] && context+="<journal-recent-sessions>"$'\n'"$session_ctx""</journal-recent-sessions>"$'\n'
+
+
 # Yesterday's journal (if it exists and has meaningful content).
 if [[ -f "$YESTERDAY_FILE" ]] && [[ -s "$YESTERDAY_FILE" ]] && (( $(wc -c < "$YESTERDAY_FILE") > 50 )); then
     yesterday_content=$(head -c "$MAX_YESTERDAY" "$YESTERDAY_FILE")
@@ -52,11 +85,13 @@ if [[ -z "$context" ]]; then
     exit 0
 fi
 
-escape_for_json() {
-    local s="$1"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}";
-    s="${s//$'\n'/\\n}"; s="${s//$'\r'/\\r}"; s="${s//$'\t'/\\t}"; printf '%s' "$s"
-}
-
-printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' \
-    "$(escape_for_json "$context")"
+# Emit via jq, not a hand-rolled escaper.
+#
+# The previous version escaped only \\ " \\n \\r \\t. Every other C0 control character
+# went through raw and produced JSON the harness cannot parse. That stayed invisible
+# while this hook carried only hand-written notes; it broke the moment it started
+# carrying session journals, whose text comes from transcripts and does contain
+# control bytes. jq escapes the whole class, and every other hook here uses it.
+jq -nc --arg ctx "$context" \
+  '{hookSpecificOutput:{hookEventName:"SessionStart",additionalContext:$ctx}}'
 exit 0
