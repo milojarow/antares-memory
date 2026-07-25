@@ -24,6 +24,17 @@ STAMP="$ANTARES_STATE/gardener-last-run"
 PREFS="$ANTARES_STATE/gardener-memory.md"        # persistent memory (operator preferences)
 BACKUP_DIR="$ANTARES_STATE/base-backups"
 DELLIST="$ANTARES_STATE/gardener-deletions.txt"
+# The lobo writes ONE RUN here; the launcher appends it to the permanent changelog.
+# Same shape as the cronista's segment-then-append, and for the same reason: the
+# lobo has Write and no Bash, and a Write to an existing file REPLACES it. The
+# changelog is the only audit trail of the one component in this system that
+# deletes an operator's memories, and it holds 40 days of history. Nothing here
+# should be one mis-aimed Write away from gone. (Filed as a hypothesis and it did
+# NOT reproduce — the run after Bash was removed appended correctly and all 40 days
+# survived. This removes the possibility rather than trusting the wording of a
+# prompt, because the backups that would have been the fallback rotate away after
+# five runs.)
+CL_ENTRY="$ANTARES_STATE/gardener-changelog-entry.md"
 
 ts() { date -Iseconds; }
 log() { printf '[%s] %s\n' "$(ts)" "$*" >>"$LOG"; }
@@ -100,7 +111,7 @@ $prefs_body
 == ALL MEMORIES ($n_mem total — full-path: description) ==
 $digest
 
-Merge near-duplicates into the best survivor (Edit it). Write the COMPLETE list of redundant/obsolete file paths to $DELLIST (one per line, single Write — the launcher validates + deletes them). Log every action to $changelog. NEVER touch MEMORY.md. Conservative: when unsure, KEEP. Update your memory at $PREFS if you learned what the operator keeps."
+Merge near-duplicates into the best survivor (Edit it). Write the COMPLETE list of redundant/obsolete file paths to $DELLIST (one per line, single Write — the launcher validates + deletes them). Write THIS RUN's changelog entry to $CL_ENTRY (single Write, just this run — the launcher appends it to the permanent changelog; do NOT open $changelog yourself). NEVER touch MEMORY.md. Conservative: when unsure, KEEP. Update your memory at $PREFS if you learned what the operator keeps."
 
 log "LAUNCH gardener (background) cwd=$cwd memories=$n_mem model=${ANTARES_GARDENER_MODEL:-opus}"
 (
@@ -115,6 +126,7 @@ log "LAUNCH gardener (background) cwd=$cwd memories=$n_mem model=${ANTARES_GARDE
     # run's work. The surviving list is short, so the launcher under-deletes: safe
     # in direction, silent in effect, and the whole pass is wasted.
     : > "$DELLIST"
+    : > "$CL_ENTRY"
     antares_link_sdk "$SCRIPT_DIR/../agents-sdk" || log "SDK not installed — run install.sh (lobo fails rc=1)"
 
     # FULL backup of the base before the gardener can merge/flag anything.
@@ -198,6 +210,20 @@ log "LAUNCH gardener (background) cwd=$cwd memories=$n_mem model=${ANTARES_GARDE
             [[ -f "$rp" ]]                 || { log "SKIP not a regular file: $p"; continue; }
             rm -f "$rp" && deleted=$((deleted+1)) && log "DELETED $rp"
         done < "$DELLIST"
+    fi
+
+    # Append this run's entry — the permanent changelog is only ever appended to,
+    # and only ever by the launcher.
+    if [[ -s "$CL_ENTRY" ]]; then
+        cl_before=$(stat -c %s "$changelog" 2>/dev/null || echo 0)
+        { printf '\n'; cat "$CL_ENTRY"; printf '\n'; } >> "$changelog" 2>>"$LOG"
+        cl_after=$(stat -c %s "$changelog" 2>/dev/null || echo 0)
+        if (( cl_after > cl_before )); then
+            log "CHANGELOG appended $(stat -c %s "$CL_ENTRY")B (${cl_before}B -> ${cl_after}B)"
+            rm -f "$CL_ENTRY"
+        else
+            log "CHANGELOG APPEND FAILED (${cl_before}B unchanged) — entry kept at $CL_ENTRY"
+        fi
     fi
 
     result=$(printf '%s' "$out" | jq -r '.result // empty' 2>/dev/null | head -c 1000)
