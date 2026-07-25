@@ -105,11 +105,36 @@ DELTA_MAX_BYTES=${ANTARES_DELTA_MAX_BYTES:-300000}
 delta="$DELTA_DIR/$session_id.md"
 delta_raw="$DELTA_DIR/.$session_id.raw"
 {
+    # Two defects lived in this filter, both silent, both measured on real data.
+    #
+    # 1. `.message.content[]?` DROPPED EVERY TURN THE OPERATOR TYPED. A typed prompt
+    #    stores `.message.content` as a plain STRING, not an array; `[]` on a string
+    #    is an error and the `?` swallowed it. 575 messages of that shape in one
+    #    project's transcripts alone. The human's own words — the instructions, the
+    #    corrections, the "no, do it this way" — never reached the cronista or the
+    #    destilador. Only the assistant's restatement of them did.
+    #
+    # 2. `(.type // "unknown")` was evaluated AFTER descending into the content
+    #    block, so it read the BLOCK's type ("text"), never the message's. Every
+    #    entry came out labelled `## [text]` and the lobos could not tell who said
+    #    what — in a chronicle, that is most of the meaning.
+    #
+    # The message is captured in `$msg` before descending, a string body is wrapped
+    # into the same shape as an array body, and the label is the message's role.
+    # tool_result and thinking blocks stay excluded by the `select` below, which is
+    # what keeps the delta to actual conversation (7812 tool_result blocks here).
+    #
+    # Measured across 73 real transcripts: 3,342,521 -> 3,725,672 bytes of extracted
+    # text. 383 KB, 11.5%, that the capture pipeline had never seen.
     awk -v s=$((wm + 1)) 'NR>=s' "$transcript_path" | jq -r '
         select(.type == "user" or .type == "assistant") |
-        .message.content[]? |
+        . as $msg |
+        (if (.message.content | type) == "string"
+           then [{type: "text", text: .message.content}]
+           else (.message.content // []) end) |
+        .[] |
         select(.type == "text") |
-        "## [" + (.type // "unknown") + "]\n\n" + .text + "\n"
+        "## [" + ($msg.type // "unknown") + "]\n\n" + .text + "\n"
     ' 2>>"$LOG"
 } > "$delta_raw" 2>>"$LOG"
 raw_size=$(stat -c %s "$delta_raw" 2>/dev/null || echo 0)
