@@ -51,6 +51,28 @@ def get_model():
     return _model
 
 
+def _majflt():
+    """Major page faults so far — faults that had to go to DISK.
+
+    This is what distinguishes "the query was slow" from "the model was not in
+    RAM". The embedding model is ~1 GB and sits idle between prompts, so on a
+    memory-pressured host the kernel swaps it out; the next query then pays for
+    paging it back in, and from the outside that is indistinguishable from a slow
+    search. Measured on this host: 909 MB of the daemon resident set was in swap
+    while the p99 query sat at 5.9s against a 4s caller budget.
+
+    A jump here during a query IS the swap-in, measured rather than inferred.
+    """
+    try:
+        with open("/proc/self/stat", "rb") as f:
+            # field 12 (1-indexed) is majflt; comm can contain spaces, so split
+            # after the closing paren of comm.
+            parts = f.read().split(b") ", 1)[1].split()
+        return int(parts[9])
+    except Exception:
+        return -1
+
+
 def open_db_readonly(db_path):
     return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
 
@@ -90,7 +112,11 @@ def do_search(query, top_k=5, threshold=0.35, types="all",
         log(f"query truncated {truncated_from} -> {max_chars} chars")
 
     model = get_model()
+    t_enc0 = time.time()
+    mf0 = _majflt()
     embedding = model.encode(query, normalize_embeddings=True)
+    encode_ms = int((time.time() - t_enc0) * 1000)
+    t_db0 = time.time()
 
     all_hits = []
     schema_versions = {}
@@ -145,10 +171,28 @@ def do_search(query, top_k=5, threshold=0.35, types="all",
             "scope": scope_name,
         })
 
+    db_ms = int((time.time() - t_db0) * 1000)
+    total_ms = int((time.time() - t0) * 1000)
+    mf = _majflt() - mf0 if mf0 >= 0 else -1
+
+    # A slow query is worth a line of its own, with the breakdown that says WHY.
+    # Without it, "4019ms" is a number you can only guess at after the fact — and
+    # guessing produced two wrong hypotheses before the right one.
+    slow_ms = int(os.environ.get("ANTARES_SLOW_QUERY_MS", "1000"))
+    if total_ms >= slow_ms:
+        cause = ("paging the model back in from swap" if mf > 50
+                 else "encode" if encode_ms > db_ms
+                 else "db search")
+        log(f"SLOW query {total_ms}ms (encode={encode_ms}ms db={db_ms}ms "
+            f"majflt={mf} chars={len(query)}) — dominant cost: {cause}")
+
     return {
         "ok": True,
         "hits": hits,
-        "timing_ms": int((time.time() - t0) * 1000),
+        "timing_ms": total_ms,
+        "encode_ms": encode_ms,
+        "db_ms": db_ms,
+        "majflt": mf,
         "model": ANTARES_MODEL,
         "db_schemas": schema_versions,
         "scopes_searched": [s for s, _ in db_paths],
