@@ -41,8 +41,28 @@ fi
 req=$(jq -nc --arg q "$prompt" --arg cwd "$cwd" \
   '{op:"search",query:$q,cwd:$cwd,scope:"all",top_k:5,threshold:0.35,types:"all"}')
 
-resp=$(printf '%s\n' "$req" | timeout 2 socat -t 2 - "UNIX-CONNECT:$SOCKET" 2>/dev/null) || {
-  printf '%s TIMEOUT prompt=%q\n' "$(date -Iseconds)" "${prompt:0:80}" >>"$LOG" 2>/dev/null || true
+# Query budget. This hook declares `timeout: 5` in settings.json but only ever
+# gave the daemon 2 of those 5 seconds — three left unused while queries were
+# killed for want of them.
+#
+# The daemon's own timing log looked reassuring (p99 1569ms, max 1995ms) and was
+# censored: anything slower than 2s was killed BEFORE it could report a timing, so
+# the slow tail was missing from the very numbers that justified the limit. The
+# honest figure is in the TIMEOUT lines — 99 of 4009 attempts on one install,
+# 2.5% of prompts answered with zero memories and no way to tell that apart from
+# "nothing relevant".
+#
+# Keep this strictly below the hook's declared timeout: past it the harness kills
+# the hook outright and nothing is logged at all.
+QUERY_TIMEOUT=${ANTARES_SEARCH_QUERY_TIMEOUT:-4}
+
+q_start=$(date +%s%N)
+resp=$(printf '%s\n' "$req" | timeout "$QUERY_TIMEOUT" socat -t "$QUERY_TIMEOUT" - "UNIX-CONNECT:$SOCKET" 2>/dev/null) || {
+  # Record how long it actually waited: a timeout with no duration cannot tell a
+  # slow daemon from a dead socket, and that is the difference between tuning this
+  # number and restarting the service.
+  printf '%s TIMEOUT after=%sms budget=%ss prompt=%q\n' \
+    "$(date -Iseconds)" "$(( ($(date +%s%N) - q_start) / 1000000 ))" "$QUERY_TIMEOUT" "${prompt:0:80}" >>"$LOG" 2>/dev/null || true
   echo '{}'
   exit 0
 }
