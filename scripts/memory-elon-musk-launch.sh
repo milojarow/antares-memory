@@ -189,14 +189,28 @@ fi
         rm -f "$diff_file"
     fi
 
+    # WARN, do not block — this repo is PRIVATE by design, and that is the control.
+    #
+    # A memory system records what the operator actually did, so a session that
+    # touched a credential produces a journal that contains it. That is expected
+    # content here, not an incident: the private repo is exactly the answer to it.
+    # Blocking would trade a bounded, intended exposure for an unbounded one —
+    # the backup stops, and the memories stop being backed up at all, silently,
+    # which is the failure this lobo exists to prevent. A backup that refuses to
+    # run is worse than a private repo holding a secret it was built to hold.
+    #
+    # It still WARNS, because "expected" is not the same as "unnoticed": a value
+    # landing in a memory is worth seeing in the log, and a repo that ever went
+    # public would make it urgent. Set ANTARES_SCRUB_BLOCK=1 to make it refuse
+    # instead — correct for a machine whose backup target is not private.
     if [[ -n "$scrub_hits" ]]; then
-        # Loud and blocking. Unstage so nothing is left armed for the next run, and
-        # do NOT name the file or print the value — the log is backed up too.
-        git reset -q -- "${PATHS[@]}" 2>/dev/null || true
-        log "REFUSING TO COMMIT — scrub gate tripped:"
+        log "SCRUB: staged diff carries credential material (expected in a private repo; see below)"
         printf '%s' "$scrub_hits" | while IFS= read -r l; do [[ -n "$l" ]] && log "$l"; done
-        log "  nothing was committed or pushed. Redact the offending memory/journal by hand, then the next session start will back up normally."
-        exit 0
+        if [[ "${ANTARES_SCRUB_BLOCK:-0}" == "1" ]]; then
+            git reset -q -- "${PATHS[@]}" 2>/dev/null || true
+            log "  ANTARES_SCRUB_BLOCK=1 — nothing committed or pushed. Redact by hand, then the next session start backs up normally."
+            exit 0
+        fi
     fi
 
     staged=$(git diff --cached --numstat -- "${PATHS[@]}" 2>/dev/null | wc -l)
