@@ -73,8 +73,26 @@ py_minor=$(echo "$py_ver" | cut -d. -f2)
 if (( py_major < 3 )) || { (( py_major == 3 )) && (( py_minor < 10 )); }; then
     die "python3 >= 3.10 required (have $py_ver)"
 fi
-if ! sqlite3 ":memory:" "CREATE VIRTUAL TABLE t USING fts5(x)" >/dev/null 2>&1; then
-    die "sqlite3 lacks FTS5 support — the keyword half of hybrid search needs it. Install a full sqlite3 build, then re-run ./install.sh"
+# Test the sqlite3 the SYSTEM ACTUALLY USES — python's module — not the CLI.
+#
+# Nothing in this system shells out to sqlite3: memory-index.py, memory-search.py
+# and the daemon all use the Python module, which links its own libsqlite3. The
+# CLI is only what happens to be first in PATH, and on a machine with the Android
+# SDK installed that is platform-tools/sqlite3, built WITHOUT fts5. So this check
+# failed and refused to install on a host whose Python sqlite3 has full FTS5 and
+# whose index has been running on it for months.
+#
+# Checking the convenient binary instead of the one that matters is the same
+# mistake this codebase keeps finding elsewhere; here it blocked a good install.
+if ! python3 - <<'FTSPY' >/dev/null 2>&1
+import sqlite3, sys
+try:
+    sqlite3.connect(":memory:").execute("CREATE VIRTUAL TABLE t USING fts5(x)")
+except Exception:
+    sys.exit(1)
+FTSPY
+then
+    die "python3's sqlite3 lacks FTS5 — the keyword half of hybrid search needs it. Install a python/sqlite build with FTS5, then re-run ./install.sh"
 fi
 # Real user-bus probe: `systemctl --user --version` never touches the bus, so it
 # proves nothing. show-environment does.
