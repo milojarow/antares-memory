@@ -68,7 +68,29 @@ if [[ "$current_dir" != "$home_dir" ]]; then
 $cur"
 fi
 n_mem=$(printf '%s' "$digest" | grep -c '^- ' || true)
+# The lobo's own memory file, CAPPED. It appends to this every run and nothing ever
+# shrinks it, so it grows without bound and crowds out the thing the run is actually
+# about. Measured on this install: 67,359 B of a 141,843 B prompt — 47% of what the
+# gardener reads before it sees a single memory, and most of the tail is a per-run
+# log of "no action" entries rather than anything an operator ever expressed.
+#
+# The head is kept, because that is where this file puts its durable findings, and
+# the truncation is declared IN the prompt with the real numbers plus an instruction
+# to consolidate. That last part is the only thing that actually reverses the growth:
+# $ANTARES_STATE is inside the lobo's write scope, so it can rewrite its own memory,
+# and a cap alone would just hide the tail forever.
+PREFS_MAX_BYTES=${ANTARES_GARDENER_PREFS_MAX:-8000}
 prefs_body=$(cat "$PREFS" 2>/dev/null || echo "(no preferences recorded yet — be extra conservative; record what the operator keeps to your memory file.)")
+prefs_bytes=${#prefs_body}
+if (( prefs_bytes > PREFS_MAX_BYTES )); then
+    prefs_body="${prefs_body:0:$PREFS_MAX_BYTES}
+
+[NOTE: your memory file is ${prefs_bytes} bytes and only the first ${PREFS_MAX_BYTES} are shown.
+ CONSOLIDATE IT THIS RUN: rewrite $PREFS keeping the durable findings and the operator's
+ stated preferences, and DROP the per-run log entries ('no action', counts, dates) — those
+ are already in $changelog. It is inside your write scope.]"
+    log "PREFS truncated ${prefs_bytes}B -> ${PREFS_MAX_BYTES}B — asked the lobo to consolidate $PREFS"
+fi
 
 task="Today is $today. Keep the base clean by ACTING (merge duplicates, remove obsolete). Do NOT leave notes.
 
@@ -138,14 +160,38 @@ log "LAUNCH gardener (background) cwd=$cwd memories=$n_mem model=${ANTARES_GARDE
     # realpath collapses `..` and follows symlinks, and the survivor must sit
     # EXACTLY in the memory dir — an equality test on the parent, not a prefix
     # match, which also excludes journal/ and any other subdirectory for free.
+    #
+    # SCOPE = the dirs the lobo was actually SHOWN, which is the global store and,
+    # when the session runs outside $HOME, the per-cwd store. It used to be the
+    # global store alone, and that made the gardener half-blind in a way that made
+    # things worse rather than merely incomplete: the digest hands it project
+    # memories, and the write scope exported above lets it Edit them — so it would
+    # merge a project duplicate into a survivor and then be refused when it asked
+    # for the husk to be removed. Content consolidated, redundant file left behind,
+    # and the next run does the same work again. Reproduced against this exact
+    # validator: "REFUSE out-of-scope path: .../-home-endymion-<project>/memory/
+    # dup-dos.md", deleted=0, file still on disk. The per-cwd store is backed up
+    # above alongside the global one, so a deletion here has the same recovery path.
     deleted=0
     home_real=$(realpath -e -- "$home_dir" 2>/dev/null || printf '%s' "$home_dir")
+    del_scopes=("$home_real")
+    if [[ "$current_dir" != "$home_dir" && -d "$current_dir" ]]; then
+        del_scopes+=("$(realpath -e -- "$current_dir" 2>/dev/null || printf '%s' "$current_dir")")
+    fi
     if [[ -s "$DELLIST" ]]; then
         while IFS= read -r p; do
             [[ -z "$p" ]] && continue
             rp=$(realpath -e -- "$p" 2>/dev/null) \
                 || { log "REFUSE unresolvable or missing: $p"; continue; }
-            [[ "$(dirname "$rp")" == "$home_real" ]] \
+            # Still an EQUALITY test on the parent, now against each allowed dir —
+            # never a prefix match. That is what keeps journal/ (the cronista's
+            # output, not this lobo's to remove), any other subdirectory, and any
+            # `..` escape out of reach, in both scopes.
+            in_scope=0
+            for _d in "${del_scopes[@]}"; do
+                [[ "$(dirname "$rp")" == "$_d" ]] && { in_scope=1; break; }
+            done
+            (( in_scope == 1 )) \
                 || { log "REFUSE out-of-scope path: $p (resolves to $rp)"; continue; }
             [[ "$rp" == *.md ]]            || { log "REFUSE not a .md: $p"; continue; }
             [[ "$(basename "$rp")" == "MEMORY.md" ]] && { log "REFUSE delete MEMORY.md"; continue; }
