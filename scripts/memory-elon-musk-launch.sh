@@ -55,6 +55,27 @@ log() { printf '[%s] %s\n' "$(ts)" "$*" >>"$LOG" 2>/dev/null || true; }
 
 [[ -d "$REPO/.git" ]] || { log "SKIP $REPO is not a git repo"; echo '{}'; exit 0; }
 
+# Mirror the lobos' persistent memories into the backed-up tree. These are what
+# the gardener and curator have LEARNED about the operator (88 KB and 8 KB here)
+# and they lived only in $ANTARES_STATE, which nothing backs up: lose the disk and
+# both lobos start over with no idea what the operator keeps. Kept OUTSIDE the
+# memory dirs on purpose — they are lobo state, not memories, and must not be
+# indexed or injected as if they were.
+#
+# In the FOREGROUND, before the pre-check below: the mirror is what makes these
+# files show up as pending, so running it after the "nothing to back up" exit
+# meant it never ran at all. Two small files, `cp -u`, so the cost is noise.
+#
+# It also has to run BEFORE the existence filter below, because it is what brings
+# lobo-state INTO existence. Filtering first meant lobo-state was dropped from
+# PATHS as "absent", created moments later, and then never staged by any run —
+# the mirror worked and the backup silently ignored its output. Order matters
+# here: a self-creating path cannot be tested for existence before its creator.
+if compgen -G "$ANTARES_STATE"/*.md >/dev/null 2>&1; then
+    mkdir -p "$REPO/lobo-state" 2>/dev/null \
+        && cp -u "$ANTARES_STATE"/*.md "$REPO/lobo-state/" 2>/dev/null || true
+fi
+
 # Keep only the paths THIS machine actually has. `git add` aborts on the first
 # pathspec that matches nothing — verified: `git add -- missing existing` prints
 # "fatal: pathspec 'missing' did not match any files" and stages ZERO files, so
@@ -72,28 +93,20 @@ if (( ${#present[@]} == 0 )); then
 fi
 PATHS=("${present[@]}")
 
-# Mirror the lobos' persistent memories into the backed-up tree. These are what
-# the gardener and curator have LEARNED about the operator (88 KB and 8 KB here)
-# and they lived only in $ANTARES_STATE, which nothing backs up: lose the disk and
-# both lobos start over with no idea what the operator keeps. Kept OUTSIDE the
-# memory dirs on purpose — they are lobo state, not memories, and must not be
-# indexed or injected as if they were.
-#
-# In the FOREGROUND, before the pre-check below: the mirror is what makes these
-# files show up as pending, so running it after the "nothing to back up" exit
-# meant it never ran at all. Two small files, `cp -u`, so the cost is noise.
-if compgen -G "$ANTARES_STATE"/*.md >/dev/null 2>&1; then
-    mkdir -p "$REPO/lobo-state" 2>/dev/null \
-        && cp -u "$ANTARES_STATE"/*.md "$REPO/lobo-state/" 2>/dev/null || true
-fi
-
 # Report memory stores this lobo does NOT cover. Legacy walk-up stores live at
 # <project>/.claude/memory/ — outside this repo, and typically gitignored by the
 # project that hosts them, so nothing backs them up at all. Naming them in the log
 # is the whole point: a backup that silently covers less than you think is the
 # failure this lobo exists to prevent, and it should not commit that failure
 # itself. Cheap (one find, depth-limited) and reported once per run.
-uncovered=$(find "$HOME/projects" -maxdepth 3 -type d -path '*/.claude/memory' 2>/dev/null | head -5)
+# `|| true` is load-bearing, not defensive noise. `find` exits 1 when the root does
+# not exist, `2>/dev/null` hides the message but not the status, `pipefail` carries
+# it through `head`, and the ERR trap at the top of this file turns that into
+# `echo '{}'; exit 0`. On a machine with no ~/projects — most of them — this
+# REPORTING line killed the backup lobo before it committed anything, and it did so
+# in the trap's own voice: a clean exit, no log line, nothing to notice. A
+# diagnostic that reports on a directory's absence must not itself die of it.
+uncovered=$(find "$HOME/projects" -maxdepth 3 -type d -path '*/.claude/memory' 2>/dev/null | head -5 || true)
 if [[ -n "$uncovered" ]]; then
     log "UNCOVERED walk-up store(s) outside this repo, not backed up here: $(printf '%s ' $uncovered)"
 fi
