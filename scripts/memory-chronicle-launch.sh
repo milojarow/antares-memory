@@ -67,7 +67,19 @@ log "watermark=$wm total_lines=$total"
 # Never `rm` the lock file while holding it: a second process would create a new
 # inode and lock that one instead, and both would think they were alone.
 exec 9>>"$LOCK"
-if ! flock -n 9; then
+# PreCompact can skip — the session is still open and SessionEnd will come. But
+# SessionEnd is the LAST trigger this session will ever fire: if it skips because
+# a PreCompact pipeline still holds the lock (those runs take minutes), the final
+# segment of the transcript is never chronicled and never retried, because nothing
+# else will ever fire for a closed session. So it waits instead. This launcher is
+# already fire-and-forget in the background, so waiting costs nobody anything.
+if [[ "$event" == "SessionEnd" ]]; then
+    lock_wait=${ANTARES_CHRONICLE_LOCK_WAIT:-600}
+    if ! flock -w "$lock_wait" 9; then
+        log "SKIP lock still held after ${lock_wait}s (SessionEnd) — final delta lost"
+        exit 0
+    fi
+elif ! flock -n 9; then
     log "SKIP lock held (a chronicle for this session is already running)"
     exit 0
 fi
@@ -100,7 +112,7 @@ log "delta size=${delta_size}B"
 if (( delta_size < 400 )); then
     log "SKIP delta trivial (${delta_size}B) — advancing watermark, no lobos"
     echo "$total" > "$WM_FILE"
-    rm -f "$delta"   # NOT the lock file — see the flock note above; exit closes FD 9
+    [[ -f "$delta" ]] && rm -f "$delta"   # a failed run moved it to .retry; leave that   # NOT the lock file — see the flock note above; exit closes FD 9
     exit 0
 fi
 
@@ -185,6 +197,35 @@ log "LAUNCH chronicle pipeline (background) event=$event session=$session_id"
         log "watermark NOT advanced (cronista rc=$c_rc) — delta retried next run"
     fi
 
+    # 0. Sweep: one delta left behind by a previously failed distillation gets a
+    # second attempt before new work. Oldest first, ONE per run — a persistent
+    # failure must not become a backlog crowding out the live session, and the
+    # attempt is consumed either way (evidence in the log, not a growing queue).
+    #
+    # The session id comes from the FILENAME, not this run's $session_id: the
+    # pending delta belongs to whichever session failed, and stamping its memories
+    # with the current id would quietly corrupt originSessionId — a wrong answer is
+    # worse than a missing one.
+    pending=$(ls -1tr "$DELTA_DIR"/*.md.retry 2>/dev/null | head -1)
+    if [[ -n "$pending" && -f "$pending" ]]; then
+        r_sid=$(basename "$pending"); r_sid="${r_sid%.md.retry}"
+        log "RETRY distilling session=$r_sid delta=$pending"
+        r_task="Distill durable memories from the NEW session activity.
+
+REAL SESSION ID (use verbatim for each memory's metadata.originSessionId): $r_sid
+DELTA (new transcript segment, text only): $pending
+$mem_block
+
+EXISTING MEMORIES (filename: description — dedup against THIS inline list, do NOT Grep all files):
+$mem_digest
+"
+        r_out=$(printf '%s' "$r_task" | timeout "${ANTARES_DISTILLER_TIMEOUT:-480}" \
+            node "$SCRIPT_DIR/../agents-sdk/destiller.mjs" 2>>"$LOG")
+        r_rc=$?
+        log "RETRY rc=$r_rc result=$(printf '%s' "$r_out" | jq -r '.result // empty' 2>/dev/null | head -c 200)"
+        rm -f "$pending"   # consumed either way: one retry, never a permanent queue
+    fi
+
     # 2. destilador → memories (chained, same delta the cronista just chronicled).
     d_out=$(printf '%s' "$destilador_task" | timeout "${ANTARES_DISTILLER_TIMEOUT:-480}" \
         node "$SCRIPT_DIR/../agents-sdk/destiller.mjs" 2>>"$LOG")
@@ -192,8 +233,24 @@ log "LAUNCH chronicle pipeline (background) event=$event session=$session_id"
     d_res=$(printf '%s' "$d_out" | jq -r '.result // empty' 2>/dev/null | head -c 300)
     log "DESTILADOR rc=$d_rc result=$d_res"
 
+    # The watermark advanced on the cronista's success above — the journal is the
+    # primary capture and re-chronicling would duplicate entries. That meant a
+    # destilador failure discarded the delta permanently: chronicled, never
+    # distilled, never retried. Measured on one install: 5 of 327 runs (3 timeouts,
+    # 2 errors), each a session's memories silently never written. Kept for exactly
+    # one more attempt by the sweep at the top of the next run.
+    if (( d_rc != 0 )); then
+        mv -f "$delta" "$delta.retry" 2>/dev/null \
+            && log "RETRY-PENDING delta kept for one more attempt: $delta.retry"
+    fi
+
     # Reindex so the new journal + memories are searchable next session.
-    [[ -f "$SCRIPT_DIR/memory-reindex.sh" ]] && bash "$SCRIPT_DIR/memory-reindex.sh" >/dev/null 2>&1 || true
+    # This call was dead: the subshell exports CLAUDE_HEADLESS=1 (correctly — it
+    # stops the lobos re-triggering hooks) and memory-reindex.sh's first line is a
+    # guard on that variable, so it returned in ~6 ms having indexed nothing, on
+    # every run. The guard is right; the call has to opt out of it for this child.
+    [[ -f "$SCRIPT_DIR/memory-reindex.sh" ]] && \
+        env -u CLAUDE_HEADLESS bash "$SCRIPT_DIR/memory-reindex.sh" >/dev/null 2>&1 || true
 
     rm -f "$delta"
 ) >/dev/null 2>&1 &
