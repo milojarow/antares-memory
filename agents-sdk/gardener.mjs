@@ -10,6 +10,7 @@
 // Reads its task prompt (which dirs to garden) from stdin. Prints a
 // CLI-compatible JSON envelope {result, subtype, total_cost_usd, num_turns}.
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { makeScopeGuard } from "./lobo-scope.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -49,8 +50,15 @@ try {
       // Writes; the launcher validates and executes the deletions. Keeping a shell
       // here bought nothing and cost the widest tool on the box.
       tools: ["Read", "Edit", "Write"],
-      allowedTools: ["Read", "Edit", "Write"], // Edit merges survivors; Write appends the deletions list + changelog + own memory; the launcher validates+executes deletions (lobo never rm's)
-      permissionMode: "bypassPermissions",
+      // NO allowedTools. Bare tool names there ("Write") AUTO-APPROVE every call,
+      // so the decision never reaches canUseTool and the scope guard below became a
+      // no-op — verified: with it present the lobo wrote outside its scope and the
+      // handler was never invoked. Availability is `tools`; the decision is the guard.
+      // "default" + canUseTool is the ONLY combination that actually scopes a write
+      // here: a path-glob in allowedTools denies even paths INSIDE it, and
+      // canUseTool is never called under bypassPermissions. Both probed.
+      permissionMode: "default",
+      canUseTool: makeScopeGuard("gardener"),
       maxTurns: 40,                          // triage digest -> merge survivors -> list deletions -> changelog
     },
   })) {

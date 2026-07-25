@@ -6,6 +6,7 @@
 // the episode; the destilador distills reusable lessons from the same delta.
 // Policy: memory-cronista-prompt.txt. Task (delta path + journal path) on stdin.
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { makeScopeGuard } from "./lobo-scope.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,8 +48,15 @@ try {
       // executes" split this system already uses for deletions. No lobo runs with
       // a shell now.
       tools: ["Read", "Write", "Edit"],
-      allowedTools: ["Read", "Write", "Edit"],  // Read delta; append to the session journal
-      permissionMode: "bypassPermissions",
+      // NO allowedTools. Bare tool names there ("Write") AUTO-APPROVE every call,
+      // so the decision never reaches canUseTool and the scope guard below became a
+      // no-op — verified: with it present the lobo wrote outside its scope and the
+      // handler was never invoked. Availability is `tools`; the decision is the guard.
+      // "default" + canUseTool is the ONLY combination that actually scopes a write
+      // here: a path-glob in allowedTools denies even paths INSIDE it, and
+      // canUseTool is never called under bypassPermissions. Both probed.
+      permissionMode: "default",
+      canUseTool: makeScopeGuard("cronista"),
       maxTurns: 15,
     },
   })) {

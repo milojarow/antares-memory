@@ -85,7 +85,8 @@ log "LAUNCH index-curator (background) cwd=$cwd memories=$n_mem model=${ANTARES_
         # Keep only the last 10 backups.
         ls -1t "$BACKUP_DIR"/MEMORY.md.* 2>/dev/null | tail -n +11 | xargs -r rm -f
     fi
-    out=$(printf '%s' "$task" | timeout "${ANTARES_CURATOR_TIMEOUT:-420}" \
+    out=$(printf '%s' "$task" | ANTARES_LOBO_WRITE_ROOTS="$home_dir:$ANTARES_STATE" \
+        timeout "${ANTARES_CURATOR_TIMEOUT:-420}" \
         node "$SCRIPT_DIR/../agents-sdk/index-curator.mjs" 2>>"$LOG")
     rc=$?
     result=$(printf '%s' "$out" | jq -r '.result // empty' 2>/dev/null | head -c 1000)

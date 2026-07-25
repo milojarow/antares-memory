@@ -7,6 +7,7 @@
 // always-on directive can lose something). Policy: memory-curator-prompt.txt. Reads
 // its task (digest + prefs + paths) from stdin. Prints a CLI-compatible JSON envelope.
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { makeScopeGuard } from "./lobo-scope.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -44,8 +45,15 @@ try {
       // lobo's policy prompt: it edits MEMORY.md in place (Edit) and Writes a
       // changelog. Nothing here needs a shell.
       tools: ["Read", "Edit", "Write"],
-      allowedTools: ["Read", "Edit", "Write"], // Edit MEMORY.md in place + Write changelog & own-memory; Read to confirm a candidate
-      permissionMode: "bypassPermissions",
+      // NO allowedTools. Bare tool names there ("Write") AUTO-APPROVE every call,
+      // so the decision never reaches canUseTool and the scope guard below became a
+      // no-op — verified: with it present the lobo wrote outside its scope and the
+      // handler was never invoked. Availability is `tools`; the decision is the guard.
+      // "default" + canUseTool is the ONLY combination that actually scopes a write
+      // here: a path-glob in allowedTools denies even paths INSIDE it, and
+      // canUseTool is never called under bypassPermissions. Both probed.
+      permissionMode: "default",
+      canUseTool: makeScopeGuard("index-curator"),
       maxTurns: 30, // reads prefs -> decides -> edits MEMORY.md -> changelog -> updates own memory
     },
   })) {

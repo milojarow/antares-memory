@@ -7,6 +7,7 @@
 // transcript). Policy: memory-distiller-prompt.txt. Task (delta path + memory
 // dirs) on stdin. Prints a CLI-compatible JSON envelope.
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { makeScopeGuard } from "./lobo-scope.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -44,8 +45,15 @@ try {
       // This lobo is fed the raw transcript delta, so it is also the most
       // injection-exposed of the pack — the last one that should hold a shell.
       tools: ["Read", "Grep", "Glob", "Write", "Edit"],
-      allowedTools: ["Read", "Grep", "Glob", "Write", "Edit"], // Read delta + Grep base (dedup) + Write/Edit memories
-      permissionMode: "bypassPermissions",
+      // NO allowedTools. Bare tool names there ("Write") AUTO-APPROVE every call,
+      // so the decision never reaches canUseTool and the scope guard below became a
+      // no-op — verified: with it present the lobo wrote outside its scope and the
+      // handler was never invoked. Availability is `tools`; the decision is the guard.
+      // "default" + canUseTool is the ONLY combination that actually scopes a write
+      // here: a path-glob in allowedTools denies even paths INSIDE it, and
+      // canUseTool is never called under bypassPermissions. Both probed.
+      permissionMode: "default",
+      canUseTool: makeScopeGuard("destilador"),
       maxTurns: 30,
     },
   })) {
