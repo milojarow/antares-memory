@@ -112,7 +112,10 @@ log "delta size=${delta_size}B"
 if (( delta_size < 400 )); then
     log "SKIP delta trivial (${delta_size}B) — advancing watermark, no lobos"
     echo "$total" > "$WM_FILE"
-    [[ -f "$delta" ]] && rm -f "$delta"   # a failed run moved it to .retry; leave that   # NOT the lock file — see the flock note above; exit closes FD 9
+    # Only the delta, and only if it is still there: a previously failed run moved
+    # it to .retry, which the sweep owns. Never the lock FILE — see the flock note
+    # above; exiting closes FD 9 and that is what releases it.
+    [[ -f "$delta" ]] && rm -f "$delta"
     exit 0
 fi
 
