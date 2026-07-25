@@ -42,7 +42,13 @@ try {
       // vectors behind a 101-session fork bomb on one install.
       // Bash stays because it is load-bearing: the lobos append to a journal or
       // changelog with `cat >> file <<EOF` rather than re-reading a large file.
-      tools: ["Read", "Edit", "Write", "Bash"],
+      // Bash REMOVED (selene, 2026-07-25). This lobo's own policy prompt says
+      // verbatim: "you do NOT have a delete tool and you do NOT run shell
+      // commands" — handing it Bash contradicted the system prompt it runs under.
+      // Its only write targets are the deletions LIST and a changelog, both plain
+      // Writes; the launcher validates and executes the deletions. Keeping a shell
+      // here bought nothing and cost the widest tool on the box.
+      tools: ["Read", "Edit", "Write"],
       allowedTools: ["Read", "Edit", "Write"], // Edit merges survivors; Write appends the deletions list + changelog + own memory; the launcher validates+executes deletions (lobo never rm's)
       permissionMode: "bypassPermissions",
       maxTurns: 40,                          // triage digest -> merge survivors -> list deletions -> changelog
