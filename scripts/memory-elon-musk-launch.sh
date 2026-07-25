@@ -47,7 +47,7 @@ REPO="$HOME/.claude"
 LOG="$ANTARES_STATE/logs/memory-elon-musk.log"
 LOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/antares-memory-elon-musk.lock"
 # Paths that hold memory DATA. Everything else in this repo is operator-authored.
-PATHS=(memory-jarvis projects)
+PATHS=(memory-jarvis projects lobo-state)
 
 mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
 ts() { date -Iseconds; }
@@ -72,11 +72,33 @@ if (( ${#present[@]} == 0 )); then
 fi
 PATHS=("${present[@]}")
 
+# Mirror the lobos' persistent memories into the backed-up tree. These are what
+# the gardener and curator have LEARNED about the operator (88 KB and 8 KB here)
+# and they lived only in $ANTARES_STATE, which nothing backs up: lose the disk and
+# both lobos start over with no idea what the operator keeps. Kept OUTSIDE the
+# memory dirs on purpose — they are lobo state, not memories, and must not be
+# indexed or injected as if they were.
+#
+# In the FOREGROUND, before the pre-check below: the mirror is what makes these
+# files show up as pending, so running it after the "nothing to back up" exit
+# meant it never ran at all. Two small files, `cp -u`, so the cost is noise.
+if compgen -G "$ANTARES_STATE"/*.md >/dev/null 2>&1; then
+    mkdir -p "$REPO/lobo-state" 2>/dev/null \
+        && cp -u "$ANTARES_STATE"/*.md "$REPO/lobo-state/" 2>/dev/null || true
+fi
+
 # Cheap pre-check in the foreground: nothing to do → don't even fork.
 # (SessionStart hooks are not on the 1.5s SessionEnd budget, but this hook
 # declares its own timeout anyway — see the gotcha in `man memories`.)
 pending=$(git -C "$REPO" status --porcelain -- "${PATHS[@]}" 2>/dev/null | grep -c . || true)
-if (( pending == 0 )); then
+# An earlier run may have committed and failed to push (offline, unreachable
+# remote). Its own comment promised "the next session start pushes the
+# accumulated commits", but the early exit above returned first whenever no NEW
+# memory had appeared since — so a backlog could sit committed-but-unpushed
+# indefinitely, with the log cheerfully reporting "nothing to back up" while the
+# remote fell further behind. Local commits are not a backup.
+unpushed=$(git -C "$REPO" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)
+if (( pending == 0 && unpushed == 0 )); then
     log "OK nothing to back up"
     echo '{}'; exit 0
 fi
@@ -92,9 +114,15 @@ fi
 
     staged=$(git diff --cached --numstat -- "${PATHS[@]}" 2>/dev/null | wc -l)
     if (( staged == 0 )); then
-        log "OK nothing staged (all ignored?)"
-        exit 0
-    fi
+        # Nothing new to commit. That is NOT a reason to leave earlier commits
+        # unpushed — this is exactly the case that let a backlog sit local
+        # forever. Fall through to the push instead of exiting.
+        if (( unpushed == 0 )); then
+            log "OK nothing staged (all ignored?)"
+            exit 0
+        fi
+        log "no new memories, but $unpushed commit(s) unpushed — pushing"
+    else
 
     # Deterministic summary — counts, not prose. Journals are noisy by nature and
     # get counted separately so the memory numbers stay meaningful.
@@ -113,13 +141,23 @@ fi
     summary=$(printf '%s, ' "${parts[@]}"); summary="${summary%, }"
     [[ -z "$summary" ]] && summary="$staged files"
 
+    # Pathspec on the commit, not just on the add: `git commit` without one writes
+    # the WHOLE index, so anything the operator had staged elsewhere in this repo
+    # would be swept into an automated commit they never asked for. Staging
+    # carefully and then committing everything defeats the point.
+    # Pathspec LAST: everything after `--` is a path, so putting it before the -m
+    # flags makes git read the commit messages as filenames ("did not match any
+    # file(s) known to git"). Caught by the failsafe, but only because there is one.
     if ! git commit -q -m "memory: $summary ($(date +%F))" \
-                    -m "Automatic backup of the memory base by the elon-musk lobo (SessionStart). Content written by the capture lobos; this only preserves it." 2>>"$LOG"; then
+                    -m "Automatic backup of the memory base by the elon-musk lobo (SessionStart). Content written by the capture lobos; this only preserves it." \
+                    -- "${PATHS[@]}" 2>>"$LOG"; then
         log "FAILED git commit"
         exit 0
     fi
     head=$(git log --oneline -1)
     log "COMMIT $head"
+
+    fi
 
     # Push is best-effort: offline or unreachable just leaves it committed, and
     # the next session start pushes the accumulated commits. NEVER pull/rebase/
