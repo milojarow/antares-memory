@@ -58,9 +58,27 @@ antares_home_memory_dir() {
 }
 
 # Boolean: does the venv exist and have sentence-transformers?
+#
+# AUTHORITATIVE BUT EXPENSIVE — it actually imports, and sentence_transformers
+# drags in torch: measured at 5.7 SECONDS against 22ms for bare interpreter
+# startup. Use it in installers and background workers, NEVER in the foreground
+# of a hook. A PostToolUse hook declaring `timeout: 5` was calling this before
+# forking its worker, so it was killed on every single fire, having done nothing
+# — for weeks, and silently, because a hook killed by its timeout looks exactly
+# like a hook that had no work to do. Foreground callers want the cheap check
+# below.
 antares_venv_ready() {
     [[ -x "$ANTARES_VENV_PY" ]] \
         && "$ANTARES_VENV_PY" -c "import sentence_transformers" 2>/dev/null
+}
+
+# Boolean: does the venv LOOK installed? Filesystem only — no interpreter start,
+# no import, ~4ms. This is the check to use on a hook's critical path; the worker
+# it guards still fails loudly (and now logs) if the install is genuinely broken,
+# so the weaker test costs nothing but a slightly later error.
+antares_venv_present() {
+    [[ -x "$ANTARES_VENV_PY" ]] || return 1
+    compgen -G "$ANTARES_VENV/lib/python*/site-packages/sentence_transformers" >/dev/null 2>&1
 }
 
 # Make the SDK resolvable from the .mjs lobos living in the

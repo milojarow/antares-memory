@@ -17,7 +17,10 @@ source "$SCRIPT_DIR/lib/common.sh"
 
 LOG="$ANTARES_STATE/logs/memory-reindex-auto.log"
 
-if ! antares_venv_ready; then
+# Cheap check ONLY: this hook declares a 5s timeout and the authoritative
+# antares_venv_ready costs ~5.7s (it imports torch), so calling it here got the
+# hook killed before it could fork — every single time.
+if ! antares_venv_present; then
     exit 0
 fi
 
