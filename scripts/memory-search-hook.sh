@@ -61,20 +61,58 @@ if [[ -z "$hits_paths" ]]; then
   exit 0
 fi
 
-# Build context block: full content of each hit file.
+# Build the context block, under a byte budget.
+#
+# This used to `cat` all 5 hits in full, uncapped, on EVERY prompt. Measured over
+# 2102 real prompts on one install: median 50 KB injected, p90 117 KB, max 278 KB
+# (~71k tokens), with 73.5% of all injected bytes being session journals — the
+# cronista's raw substrate rather than curated recall. Nothing surfaced it: the
+# log line read "OK hits=5" either way. Not data loss; context and cost burned
+# silently on every turn.
+#
+# A SIZE cap, not a type filter: journals and memories share a ~2 KB median, and
+# only the tail hurts. An 8 KB per-file cap touched 6.1% of files there — exactly
+# the ones doing the damage — leaving the other 94% injected whole, which is the
+# point of curated memories. Result on the same corpus: median 50 KB -> 12 KB,
+# max 278 KB -> 28 KB, 79.7% fewer bytes.
+#
+# Over the cap, the daemon's `snippet` (the chunk that actually matched) goes in
+# with the path, so what earned the hit is still present and the rest is one Read
+# away. Truncation is LOGGED — a silent cap is just a quieter version of the same
+# bug. Both limits are overridable for tuning.
+MAX_FILE_BYTES=${ANTARES_INJECT_MAX_FILE:-8192}
+MAX_TOTAL_BYTES=${ANTARES_INJECT_MAX_TOTAL:-32768}
+
 ctx=$'<auto-loaded-memory>\nMemories auto-loaded by semantic similarity to your current prompt:\n\n'
-while IFS= read -r path; do
-  [[ -f "$path" ]] || continue
-  ctx+=$'## '"$(basename "$path")"$'\n\n'"$(cat "$path")"$'\n\n'
-done <<<"$hits_paths"
+n_hits=$(jq -r '.hits | length' <<<"$resp" 2>/dev/null || echo 0)
+total=0
+trimmed=()
+for (( i=0; i<n_hits; i++ )); do
+  path=$(jq -r ".hits[$i].path // empty" <<<"$resp" 2>/dev/null)
+  [[ -n "$path" && -f "$path" ]] || continue
+  size=$(stat -c %s "$path" 2>/dev/null || echo 0)
+  name=$(basename "$path")
+
+  if (( size <= MAX_FILE_BYTES && total + size <= MAX_TOTAL_BYTES )); then
+    ctx+=$'## '"$name"$'\n\n'"$(cat "$path")"$'\n\n'
+    total=$(( total + size ))
+  else
+    snip=$(jq -r ".hits[$i].snippet // empty" <<<"$resp" 2>/dev/null)
+    ctx+=$'## '"$name"$' (excerpt — '"$(( size / 1024 ))"$' KB, Read the file for the rest)\n\n'"$path"$'\n\n'"$snip"$'\n\n'
+    total=$(( total + ${#snip} + ${#path} ))
+    trimmed+=("$name:$((size/1024))KB")
+  fi
+done
 ctx+=$'</auto-loaded-memory>'
 
 # Log success with hit details.
 {
-  printf '%s OK timing=%sms hits=%s prompt=%q\n' \
+  printf '%s OK timing=%sms hits=%s injected=%sB%s prompt=%q\n' \
     "$(date -Iseconds)" \
     "$(jq -r '.timing_ms' <<<"$resp")" \
-    "$(jq -r '.hits | length' <<<"$resp")" \
+    "$n_hits" \
+    "$total" \
+    "$( (( ${#trimmed[@]} )) && printf ' trimmed=%s' "$(IFS=,; echo "${trimmed[*]}")" )" \
     "${prompt:0:120}"
   jq -r '.hits[] | "  [\(.score)] \(.path)"' <<<"$resp"
 } >>"$LOG" 2>/dev/null || true
