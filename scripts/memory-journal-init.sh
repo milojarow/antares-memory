@@ -70,7 +70,15 @@ fi
 if [[ -f "$YESTERDAY_FILE" ]] && [[ -s "$YESTERDAY_FILE" ]] && (( $(wc -c < "$YESTERDAY_FILE") > 50 )); then
     yesterday_content=$(head -c "$MAX_YESTERDAY" "$YESTERDAY_FILE")
     (( $(wc -c < "$YESTERDAY_FILE") > MAX_YESTERDAY )) && yesterday_content+=$'\n[... truncated for context efficiency ...]'
-    context="<journal-yesterday>"$'\n'"$yesterday_content"$'\n'"</journal-yesterday>"$'\n'
+    # `+=`, not `=`. This single character discarded the recent-sessions block
+    # assembled above whenever yesterday's journal had content — and the block it
+    # threw away is the larger one, up to MAX_SESSION_BYTES across the last few
+    # sessions. Reproduced: with no yesterday file the hook injects
+    # <journal-recent-sessions>; drop a yesterday file in and it injects
+    # <journal-yesterday> alone, the other block simply gone. It stayed hidden here
+    # because the day files are created as an empty 36-byte template and only pass
+    # the 50-byte gate on days that actually got written up.
+    context+="<journal-yesterday>"$'\n'"$yesterday_content"$'\n'"</journal-yesterday>"$'\n'
 fi
 
 # Today's journal.
