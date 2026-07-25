@@ -57,6 +57,11 @@ HARD_CAP_TOKENS = MODEL_MAX_TOKENS - SPECIAL_TOKENS   # 126: never exceed this
 TARGET_TOKENS = 96
 OVERLAP_TOKENS = 24                                   # 96 + 24 = 120 <= 126
 
+# Bump this whenever the chunking algorithm or its token budget changes. It is
+# what makes a chunker fix reach content that is already indexed — see the
+# re-chunk gate in index_scope().
+CHUNKER_VERSION = 2
+
 
 def get_scopes(scope_arg, cwd=None):
     """Return list of (name, memory_dir) tuples for the requested scope(s).
@@ -304,12 +309,30 @@ def index_scope(model, scope_name, memory_dir):
 
     tokenizer = model.tokenizer
 
+    # Does the stored corpus predate the current chunker? This run re-chunks
+    # everything if so. Without it, fixing the chunker only ever fixes content
+    # written AFTER the fix: indexing is incremental (needs_update skips any file
+    # whose mtime hasn't moved), so every chunk already in the DB keeps whatever
+    # shape the old code gave it, forever. That is not hypothetical — the token
+    # cap added above corrected chunks that were being silently truncated by the
+    # embedder, and on an install that simply ran the fixed indexer, 13.6% of
+    # chunks stayed over the limit because nothing had touched their files. The
+    # fix appeared to work only where the index had been rebuilt from scratch for
+    # unrelated reasons. Healing the corpus must not depend on that luck.
+    stored_chunker = conn.execute(
+        "SELECT value FROM metadata WHERE key = 'chunker_version'"
+    ).fetchone()
+    rechunk_all = (stored_chunker is None) or (stored_chunker[0] != str(CHUNKER_VERSION))
+    if rechunk_all:
+        print(f"[{scope_name}] chunker v{CHUNKER_VERSION}: re-chunking every file "
+              f"(stored: {stored_chunker[0] if stored_chunker else 'none'})")
+
     files = get_md_files(memory_dir)
     updated = 0
 
     for filepath in files:
         mtime = os.path.getmtime(filepath)
-        if not needs_update(conn, filepath, mtime):
+        if not rechunk_all and not needs_update(conn, filepath, mtime):
             continue
 
         content, title = extract_content(filepath)
@@ -369,6 +392,13 @@ def index_scope(model, scope_name, memory_dir):
     )
     conn.execute(
         "INSERT OR REPLACE INTO metadata VALUES ('schema_version', '2')"
+    )
+    # Written LAST, and only on a run that completed: if this run dies partway,
+    # the stored version stays behind and the next run re-chunks again rather
+    # than declaring a half-converted corpus done.
+    conn.execute(
+        "INSERT OR REPLACE INTO metadata VALUES ('chunker_version', ?)",
+        (str(CHUNKER_VERSION),),
     )
     conn.commit()
     conn.close()
