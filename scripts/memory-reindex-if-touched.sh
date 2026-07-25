@@ -73,14 +73,26 @@ else
 fi
 
 # Async reindex of just the affected slug.
+#
+# Shares the SessionStart reindexer's lock so the two never write the same SQLite
+# file at once. That reindexer used to be synchronous, so the race was narrow;
+# detaching it (to stop it dying on its hook timeout) widened it.
+# `-w`, not `-n`: this already runs in the background, so waiting for the other
+# reindexer to finish costs nobody anything, whereas skipping would silently drop
+# the indexing of a memory that was just written — the exact class of failure the
+# detach was meant to end. Queued runs are cheap: the indexer only touches files
+# whose mtime beats the stored one, so whoever gets there first does the work and
+# the rest exit having found nothing stale.
+LOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/antares-memory-reindex.lock"
 {
+  flock -w 300 9 || { printf '[%s] SKIP lock wait timed out\n' "$(date -Iseconds)" >>"$LOG"; exit 0; }
   printf '[%s] reindex slug=%s (%s) triggered by %s\n' \
     "$(date -Iseconds)" "$slug" "${scope_args[*]}" "$file_path" >>"$LOG"
   "$ANTARES_VENV_PY" "$SCRIPT_DIR/memory-index.py" \
     "${scope_args[@]}" >>"$LOG" 2>&1
   rc=$?   # capture BEFORE anything else runs: the $(date) below would clobber $?
   printf '[%s] reindex done slug=%s rc=%s\n' "$(date -Iseconds)" "$slug" "$rc" >>"$LOG"
-} </dev/null >/dev/null 2>&1 &
+} 9>>"$LOCK" </dev/null >/dev/null 2>&1 &
 disown
 
 exit 0
