@@ -45,9 +45,11 @@ log "INVOKED event=$event reason=$reason session=$session_id transcript=$transcr
 
 WM_FILE="$WM_DIR/$session_id"
 LOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/antares-chronicle-$session_id.lock"
+# Cheap pre-filter only — the authoritative read happens under the lock below.
+# Safe as an optimisation because a watermark only ever grows: a stale value here
+# can only be too LOW, which sends us on to the real check, never too high.
 wm=$(cat "$WM_FILE" 2>/dev/null || echo 0)
 total=$(wc -l < "$transcript_path" 2>/dev/null || echo 0)
-log "watermark=$wm total_lines=$total"
 (( total <= wm )) && { log "SKIP nothing new (total=$total <= wm=$wm)"; exit 0; }
 
 # Lock per session (covers a PreCompact + SessionEnd near-collision).
@@ -66,6 +68,22 @@ log "watermark=$wm total_lines=$total"
 # spans the foreground prep and the lobos, and is released when they finish.
 # Never `rm` the lock file while holding it: a second process would create a new
 # inode and lock that one instead, and both would think they were alone.
+# EVERYTHING from here runs DETACHED, and the lock is taken inside it.
+#
+# It used to be acquired in the hook's foreground, ~170 lines before the dispatch,
+# with `flock -w 600` for SessionEnd — inside a hook that declares `timeout: 30`.
+# Reproduced: with the lock held by a PreCompact pipeline (139s-5min in
+# production), the hook ran 32004 ms and was killed rc=124. It never reached the
+# delta, never dispatched, never advanced the watermark, and never wrote the SKIP
+# line either — that line is unreachable, because 600s of waiting cannot fit in a
+# 30s budget. The log simply stopped, indistinguishable from a run that never
+# happened, and SessionEnd is the LAST trigger a closed session ever fires, so
+# nothing retried it.
+#
+# Detached, the wait costs nobody anything: the hook returns immediately and the
+# pipeline waits its turn on its own time.
+log "LAUNCH chronicle pipeline (background) event=$event session=$session_id"
+(
 exec 9>>"$LOCK"
 # PreCompact can skip — the session is still open and SessionEnd will come. But
 # SessionEnd is the LAST trigger this session will ever fire: if it skips because
@@ -83,6 +101,16 @@ elif ! flock -n 9; then
     log "SKIP lock held (a chronicle for this session is already running)"
     exit 0
 fi
+
+# Re-read UNDER the lock. The values read in the foreground are from before the
+# wait, and whoever held the lock was very likely a pipeline for this same session
+# that advanced the watermark while we waited. Cutting the delta with the stale
+# number hands the cronista turns it has already chronicled — the exact duplication
+# this file's header promises cannot happen.
+wm=$(cat "$WM_FILE" 2>/dev/null || echo 0)
+total=$(wc -l < "$transcript_path" 2>/dev/null || echo 0)
+log "watermark=$wm total_lines=$total (under lock)"
+(( total <= wm )) && { log "SKIP nothing new under lock (total=$total <= wm=$wm)"; exit 0; }
 
 # Extract the DELTA: new .jsonl lines [wm+1 .. total], preprocessed to user/assistant
 # text (same jq shape the old extractor used — strips tool calls/results).
@@ -237,10 +265,8 @@ $mem_digest
 
 Per your policy: durable lessons/facts only, conservative, never the journal nor MEMORY.md. Dedup each candidate against the digest above; only Read a specific file if you must confirm before enriching."
 
-log "LAUNCH chronicle pipeline (background) event=$event session=$session_id"
-(
-    # No lock cleanup here: FD 9 is inherited from the parent and the kernel drops
-    # the flock when this subshell exits — including when it is killed.
+    # No lock cleanup needed: the kernel drops the flock when this subshell exits,
+    # including when it is killed.
     export CLAUDE_HEADLESS=1
     # Self-heal the SDK symlink in the deploy dir (symlink → stable install, survives updates).
     antares_link_sdk "$SCRIPT_DIR/../agents-sdk" || log "SDK not installed — run install.sh (lobos fail rc=1)"
