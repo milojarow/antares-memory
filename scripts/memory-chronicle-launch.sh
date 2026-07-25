@@ -28,6 +28,29 @@ mkdir -p "$WM_DIR" "$DELTA_DIR" 2>/dev/null || true
 ts() { date -Iseconds; }
 log() { printf '[%s] %s\n' "$(ts)" "$*" >>"$LOG"; }
 
+# Advance the watermark and PROVE it landed. `echo > file` is not guaranteed: a
+# full state filesystem, a read-only mount, a watermark file left owned by root by
+# a run under sudo — any of them fail here, and the launcher used to log
+# "watermark advanced -> N" on the strength of having tried.
+#
+# Measured: with the file chmod 444 and 16 lines of new transcript, the log said
+# `watermark advanced -> 16` while the file still held 8. Every later run then
+# re-extracted the same delta and appended the same chronicle to the journal
+# again — duplication, permanent, reported as success. The journal append twenty
+# lines below already verifies itself by comparing sizes; this did not.
+advance_watermark() {
+    local want=$1 got
+    if echo "$want" > "$WM_FILE" 2>>"$LOG"; then
+        got=$(cat "$WM_FILE" 2>/dev/null || true)
+        if [[ "$got" == "$want" ]]; then
+            log "watermark advanced -> $want"
+            return 0
+        fi
+    fi
+    log "WATERMARK WRITE FAILED (file still '$(cat "$WM_FILE" 2>/dev/null || true)', wanted $want) — the next run re-chronicles this same delta and the journal will duplicate it. Check permissions and free space on $WM_FILE."
+    return 1
+}
+
 input=$(cat)
 transcript_path=$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2>/dev/null || true)
 session_id=$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null || true)
@@ -154,7 +177,20 @@ delta_raw="$DELTA_DIR/.$session_id.raw"
     #
     # Measured across 73 real transcripts: 3,342,521 -> 3,725,672 bytes of extracted
     # text. 383 KB, 11.5%, that the capture pipeline had never seen.
-    awk -v s=$((wm + 1)) 'NR>=s' "$transcript_path" | jq -r '
+    # 3. A SINGLE malformed line used to discard everything after it. jq parses a
+    #    stream and ABORTS on the first bad record, so one truncated line — which
+    #    is not exotic, the hook reads the transcript while Claude Code is still
+    #    appending to it — took the rest of the session with it. Measured on a
+    #    transcript of 5 good records, 1 broken, 5 good: 5 emitted, 5 dropped. With
+    #    the break on line 1: 0 of 5 emitted. And the watermark advances to the full
+    #    line count either way, so the dropped material is marked captured forever.
+    #
+    #    `-R` + `fromjson?` parses line by line and SKIPS what won't parse instead of
+    #    giving up on the file. Each skip goes to the log, because a filter that
+    #    quietly eats records is the same failure wearing a better disguise.
+    awk -v s=$((wm + 1)) 'NR>=s' "$transcript_path" | jq -Rr '
+        select(length > 0) |
+        (fromjson? // ("[skip] unparseable transcript line dropped: " + .[0:70] + "\n" | stderr | empty)) |
         select(.type == "user" or .type == "assistant") |
         . as $msg |
         (if (.message.content | type) == "string"
@@ -190,7 +226,7 @@ fi
 # Advance the watermark anyway so it doesn't re-trigger on the same trivial tail.
 if (( delta_size < 400 )); then
     log "SKIP delta trivial (${delta_size}B) — advancing watermark, no lobos"
-    echo "$total" > "$WM_FILE"
+    advance_watermark "$total"
     # Only the delta, and only if it is still there: a previously failed run moved
     # it to .retry, which the sweep owns. Never the lock FILE — see the flock note
     # above; exiting closes FD 9 and that is what releases it.
@@ -323,8 +359,7 @@ Per your policy: durable lessons/facts only, conservative, never the journal nor
     (( captured == 1 )) && [[ -f "$segment" ]] && rm -f "$segment"
 
     if (( c_rc == 0 && captured == 1 )); then
-        echo "$total" > "$WM_FILE"
-        log "watermark advanced -> $total"
+        advance_watermark "$total"
     elif (( c_rc != 0 )); then
         log "watermark NOT advanced (cronista rc=$c_rc) — delta retried next run"
     else
