@@ -116,20 +116,39 @@ log "LAUNCH gardener (background) cwd=$cwd memories=$n_mem model=${ANTARES_GARDE
     # or one failure locks the gardener out for ~24h without ever having run. Retry next close.
     if (( rc == 0 )); then echo "$now" > "$STAMP"; else log "gardener rc=$rc — gate NOT stamped, retries next close"; fi
 
-    # Execute the lobo's deletions list — VALIDATED: a .md inside home_dir, never MEMORY.md.
+    # Execute the lobo's deletions list — VALIDATED. This is the only place in the
+    # system that deletes an operator's memories, so the check has to hold against
+    # a path the lobo got wrong, not just against a path it got right.
+    #
+    # It is RESOLVED first, because a glob cannot do this job. `case "$p" in
+    # "$home_dir"/*.md)` reads like "a .md directly inside the memory dir" and is
+    # not: `*` in a case pattern spans '/', so the same pattern also accepts
+    #
+    #     $home_dir/../../../../../../etc/cron.d/x.md
+    #     $home_dir/../../../../home/<user>/.ssh/authorized_keys.md
+    #     $home_dir/journal/session-<id>.md
+    #
+    # — all three verified against the original pattern. The first two are an
+    # arbitrary .md delete anywhere the user can write; the third is the cronista's
+    # output, which is not this lobo's to remove. The lobo's input derives from
+    # memory text and transcripts, so "it would never emit that" is not a control.
+    #
+    # realpath collapses `..` and follows symlinks, and the survivor must sit
+    # EXACTLY in the memory dir — an equality test on the parent, not a prefix
+    # match, which also excludes journal/ and any other subdirectory for free.
     deleted=0
+    home_real=$(realpath -e -- "$home_dir" 2>/dev/null || printf '%s' "$home_dir")
     if [[ -s "$DELLIST" ]]; then
         while IFS= read -r p; do
             [[ -z "$p" ]] && continue
-            case "$p" in
-                "$home_dir"/*.md)
-                    bn=$(basename "$p")
-                    [[ "$bn" == "MEMORY.md" ]] && { log "REFUSE delete MEMORY.md"; continue; }
-                    [[ -f "$p" ]] || { log "SKIP missing $p"; continue; }
-                    rm -f "$p" && deleted=$((deleted+1)) && log "DELETED $p"
-                    ;;
-                *) log "REFUSE out-of-scope path: $p" ;;
-            esac
+            rp=$(realpath -e -- "$p" 2>/dev/null) \
+                || { log "REFUSE unresolvable or missing: $p"; continue; }
+            [[ "$(dirname "$rp")" == "$home_real" ]] \
+                || { log "REFUSE out-of-scope path: $p (resolves to $rp)"; continue; }
+            [[ "$rp" == *.md ]]            || { log "REFUSE not a .md: $p"; continue; }
+            [[ "$(basename "$rp")" == "MEMORY.md" ]] && { log "REFUSE delete MEMORY.md"; continue; }
+            [[ -f "$rp" ]]                 || { log "SKIP not a regular file: $p"; continue; }
+            rm -f "$rp" && deleted=$((deleted+1)) && log "DELETED $rp"
         done < "$DELLIST"
     fi
 
