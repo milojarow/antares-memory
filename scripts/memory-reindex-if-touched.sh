@@ -53,14 +53,30 @@ case "$file_path" in
 esac
 [[ "$file_path" == *.md ]] || exit 0
 
-# Async reindex of just the affected slug. We pass --cwd so the indexer
-# resolves the same slug dir on its own.
+# Pick the scope the indexer will actually accept for this slug.
+#
+# `--scope current` is NOT universal: get_scopes() dedupes current against home
+# and returns an EMPTY list when the two resolve to the same dir. So on a machine
+# whose working dir IS $HOME — the common case for an operator who lives in the
+# shell — every trigger here resolved to nothing, printed "reindex done", and
+# exited 0 having indexed zero files. A component that reports success without
+# working is worse than one that fails, and this one hid behind the SessionStart
+# reindex until that one broke too.
+target_dir="$ANTARES_PROJECTS_DIR/$slug/memory"
+if [[ "$target_dir" == "$(antares_home_memory_dir)" ]]; then
+    scope_args=(--scope home)
+else
+    scope_args=(--scope current --cwd "$cwd")
+fi
+
+# Async reindex of just the affected slug.
 {
-  printf '[%s] reindex slug=%s triggered by %s\n' \
-    "$(date -Iseconds)" "$slug" "$file_path" >>"$LOG"
+  printf '[%s] reindex slug=%s (%s) triggered by %s\n' \
+    "$(date -Iseconds)" "$slug" "${scope_args[*]}" "$file_path" >>"$LOG"
   "$ANTARES_VENV_PY" "$SCRIPT_DIR/memory-index.py" \
-    --scope current --cwd "$cwd" >>"$LOG" 2>&1
-  printf '[%s] reindex done slug=%s\n' "$(date -Iseconds)" "$slug" >>"$LOG"
+    "${scope_args[@]}" >>"$LOG" 2>&1
+  rc=$?   # capture BEFORE anything else runs: the $(date) below would clobber $?
+  printf '[%s] reindex done slug=%s rc=%s\n' "$(date -Iseconds)" "$slug" "$rc" >>"$LOG"
 } </dev/null >/dev/null 2>&1 &
 disown
 

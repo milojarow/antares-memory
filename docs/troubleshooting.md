@@ -94,6 +94,48 @@ Manual reindex:
 "$ANTARES_VENV_PY" "$HOME/.claude/scripts/memory-index.py" --scope current --cwd /path
 ```
 
+## The index is frozen: memories written days ago are invisible to search
+
+The symptom is not an error — it is a *silence*. Everything reports healthy, the
+capture lobos all exit `rc=0`, new `.md` files keep appearing, and yet a query
+quoting a recent memory almost verbatim does not return it.
+
+Check the index clock, not the logs:
+
+```bash
+sqlite3 ~/.claude/projects/<slug>/memory/.memory-index.db \
+  "SELECT datetime(CAST(value AS REAL),'unixepoch') FROM metadata WHERE key='last_index_time'"
+```
+
+If that timestamp is days old while `.md` files are minutes old, the reindex is
+being killed before it can commit. `memory-index.py` writes everything in one
+transaction at the END of a run, so a run that doesn't finish leaves the DB
+completely untouched — including its mtime, which is what the SessionStart hook
+uses to decide whether to try again. That makes the failure **self-reinforcing**:
+each session retries the same too-big batch, dies at the same point, and the
+backlog is bigger next time. It never recovers on its own.
+
+Measure the real cost before concluding anything:
+
+```bash
+time "$ANTARES_VENV_PY" "$HOME/.claude/scripts/memory-index.py" --scope home
+```
+
+Two numbers matter — the fixed cost (loading the embedding model, ~10s) and the
+per-file cost (~2.5s/file on a small VPS). A backlog of a few dozen files clears
+the minute-mark easily, which is why the indexer must run **detached** from the
+hook (it does, since the fix) rather than inside its timeout budget.
+
+Running that command by hand is also the repair: it is incremental (`needs_update`
+compares each file's mtime against its chunks) and non-destructive, since the
+`.md` files are the source of truth and the index is a derived artifact. The
+search daemon opens the DB read-only **per query**, so a repaired index is served
+immediately — no daemon restart needed.
+
+Worth wiring an alarm on that same timestamp (alert if older than ~48h). This
+class of failure — a component that dies quietly while everything around it keeps
+reporting success — is only ever caught by a heartbeat that someone is watching.
+
 ## FTS5 missing
 
 If you see `sqlite3.OperationalError: no such module: fts5` in logs, your SQLite build doesn't have FTS5 compiled in.

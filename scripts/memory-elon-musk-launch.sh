@@ -55,6 +55,23 @@ log() { printf '[%s] %s\n' "$(ts)" "$*" >>"$LOG" 2>/dev/null || true; }
 
 [[ -d "$REPO/.git" ]] || { log "SKIP $REPO is not a git repo"; echo '{}'; exit 0; }
 
+# Keep only the paths THIS machine actually has. `git add` aborts on the first
+# pathspec that matches nothing — verified: `git add -- missing existing` prints
+# "fatal: pathspec 'missing' did not match any files" and stages ZERO files, so
+# one legacy path absent means no backup at all, forever, on that machine. The
+# pre-check below would still pass (`git status --porcelain` tolerates unmatched
+# pathspecs), so the only symptom is a "FAILED git add" line in a log nobody
+# reads — exactly the silent-failure shape this lobo exists to prevent.
+present=()
+for p in "${PATHS[@]}"; do
+    [[ -e "$REPO/$p" ]] && present+=("$p")
+done
+if (( ${#present[@]} == 0 )); then
+    log "SKIP none of the memory paths exist in $REPO (${PATHS[*]})"
+    echo '{}'; exit 0
+fi
+PATHS=("${present[@]}")
+
 # Cheap pre-check in the foreground: nothing to do → don't even fork.
 # (SessionStart hooks are not on the 1.5s SessionEnd budget, but this hook
 # declares its own timeout anyway — see the gotcha in `man memories`.)
