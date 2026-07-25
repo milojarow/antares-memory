@@ -60,6 +60,9 @@ cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null || true)
 # of ~320 memories, growing linearly with it. `find -newer` applies the same
 # mtime comparison inside a single traversal, and `-quit` stops it the moment one
 # file qualifies. Same answer, ~3 orders of magnitude cheaper.
+#
+# "Newer than the DB" answers only one of the three questions that matter, and the
+# two it missed both end with the index describing a store that no longer exists.
 needs_reindex() {
     local mdir="$1"
     local db="$mdir/.memory-index.db"
@@ -69,7 +72,60 @@ needs_reindex() {
         [[ -n "$(find "$mdir" -name '*.md' -print -quit 2>/dev/null)" ]]
         return $?
     fi
-    [[ -n "$(find "$mdir" -name '*.md' -newer "$db" -print -quit 2>/dev/null)" ]]
+
+    # (1) A surviving file changed.
+    [[ -n "$(find "$mdir" -name '*.md' -newer "$db" -print -quit 2>/dev/null)" ]] && return 0
+
+    # (2) An entry was ADDED, DELETED or RENAMED. A directory's mtime moves for
+    #     exactly that, and the old gate never looked at it — it only asked whether
+    #     some SURVIVING file was newer than the DB, which after a deletion is no
+    #     one. So a deleted memory kept its chunks and kept being returned.
+    #
+    #     That is not theoretical: the gardener is the component whose whole job is
+    #     deleting memories, and the reindex it fires immediately afterwards came
+    #     through this same gate. Measured end to end — delete a memory, run the
+    #     gardener's exact call, then query: the deleted file came back as the TOP
+    #     hit at 0.83 while not existing on disk, and the reindex had logged
+    #     nothing at all because it was never launched. The indexer itself purges
+    #     correctly (verified: same file, 0 chunks, once it is actually allowed to
+    #     run); it was never the problem.
+    #
+    #     Ask the exact question — does every path the index still claims exist? —
+    #     instead of an mtime proxy. The obvious proxy, "is the DIRECTORY newer
+    #     than the DB", is WRONG HERE and was caught by the negative control: in
+    #     WAL mode SQLite creates .memory-index.db-wal/-shm inside this very
+    #     directory and REMOVES them when it closes cleanly, so the directory's
+    #     mtime always lands after the DB's and the gate fires on every session
+    #     start forever. One sqlite3 call plus a builtin -e per row costs ~10ms on
+    #     a store of ~350 files; the shape this replaced forked `stat` per file and
+    #     measured 6.2s.
+    if command -v sqlite3 >/dev/null 2>&1; then
+        local p
+        while IFS= read -r p; do
+            [[ -n "$p" && ! -e "$p" ]] && return 0
+        done < <(sqlite3 -readonly "$db" \
+                 "SELECT DISTINCT file_path FROM memory_chunks" 2>/dev/null)
+    fi
+
+    # (3) The CHUNKER changed. Bumping CHUNKER_VERSION is meant to re-embed every
+    #     file, and memory-index.py does exactly that when it runs — but no .md is
+    #     newer than the DB after a bump, so this gate said "nothing to do" and the
+    #     bump silently applied to new files only, leaving a corpus split between
+    #     two chunkings. Read from the source file so there is still ONE definition
+    #     of the version. sqlite3 is a hard dependency of install.sh; if it is
+    #     missing anyway, skip this check rather than reindex on every single start.
+    if command -v sqlite3 >/dev/null 2>&1; then
+        local want have
+        want=$(grep -m1 -oE '^CHUNKER_VERSION[[:space:]]*=[[:space:]]*[0-9]+' \
+               "$SCRIPT_DIR/memory-index.py" 2>/dev/null | grep -oE '[0-9]+$' || true)
+        if [[ -n "$want" ]]; then
+            have=$(sqlite3 -readonly "$db" \
+                   "SELECT value FROM metadata WHERE key='chunker_version'" 2>/dev/null || true)
+            [[ "$have" != "$want" ]] && return 0
+        fi
+    fi
+
+    return 1
 }
 
 home_dir="$(antares_home_memory_dir)"
@@ -91,9 +147,30 @@ fi
 # Everything past this point is detached: the embedding work takes as long as it
 # takes (minutes, on a big backlog) and MUST outlive the hook's timeout.
 (
-    flock -n 9 || { antares_log "$LOG_FILE" "SKIP lock held (a reindex is already running)"; exit 0; }
+    # WAIT for the lock, don't abandon the work. This used to be `flock -n`, while
+    # its twin memory-reindex-if-touched.sh waits up to 300s — the same lock, two
+    # opposite policies. Bailing loses real work: two sessions starting at once
+    # index DIFFERENT scopes (each one's own project slug), so the loser dropped
+    # its project's reindex entirely and that store stayed stale for the whole
+    # session. The gardener's post-deletion reindex comes through here too, so the
+    # loser also skipped purging just-deleted memories from the index.
+    #
+    # Waiting is free: everything here is already detached from the hook.
+    flock -w 300 9 || { antares_log "$LOG_FILE" "SKIP lock wait timed out after 300s"; exit 0; }
 
     for scope in "${scopes[@]}"; do
+        # Re-decide UNDER the lock. The decision above was made before waiting, and
+        # the run we waited behind may have already done this exact scope — same
+        # reason the chronicle launcher re-reads its watermark once it holds its own
+        # lock. Without this, waiting converts a wasted skip into a wasted reindex.
+        case "$scope" in
+            home)    scope_dir="$home_dir" ;;
+            current) scope_dir="$current_dir" ;;
+        esac
+        if ! needs_reindex "$scope_dir"; then
+            antares_log "$LOG_FILE" "SKIP scope=$scope — already fresh (another run did it while we waited)"
+            continue
+        fi
         start=$SECONDS
         if [[ "$scope" == "home" ]]; then
             "$ANTARES_VENV_PY" "$SCRIPT_DIR/memory-index.py" --scope home >/dev/null 2>&1
