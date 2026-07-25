@@ -346,7 +346,27 @@ def index_scope(model, scope_name, memory_dir):
             continue
 
         content, title = extract_content(filepath)
-        if not content.strip():
+        # Same content gate the INJECTOR already applies. memory-journal-init.sh
+        # writes a 36-byte stub (`# Journal: <date>` + `## Sessions`) on every
+        # session-start day and then refuses to inject it, because it knows the file
+        # is inert — but the indexer only rejected a strictly EMPTY body, so every
+        # stub still got a full embedding.
+        #
+        # Being near-identical to each other, they tie on score and sweep the top-5:
+        # measured here, the query "journal sessions" returned 5 of 5 slots filled
+        # with empty stubs at 0.825, crowding out every real memory. One more is
+        # added per session-day, forever, and nothing prunes them (the gardener's
+        # validated delete requires the parent to be the memory dir, which excludes
+        # journal/ by design).
+        #
+        # 50 chars matches the injector's `(( sz > 50 ))`. Verified against this
+        # store before applying: it drops exactly the 46 stubs and zero real files —
+        # the stubs sit at 34 chars and the smallest real memory is far above 80.
+        min_chars = int(os.environ.get("ANTARES_MIN_CONTENT_CHARS", "50"))
+        if len(content.strip()) < min_chars:
+            # Delete any chunks a previous run already made from it, so the fix
+            # reaches what is already indexed instead of only new files.
+            conn.execute("DELETE FROM memory_chunks WHERE file_path = ?", (filepath,))
             continue
 
         file_type = "journal" if "/journal/" in filepath else "memory"
