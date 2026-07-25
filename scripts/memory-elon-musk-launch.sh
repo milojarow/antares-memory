@@ -136,6 +136,69 @@ fi
     # repo is never swept into a commit it didn't ask for.
     git add -- "${PATHS[@]}" 2>/dev/null || { log "FAILED git add"; exit 0; }
 
+    # SCRUB GATE — refuse to commit a diff that carries a live secret.
+    #
+    # This exists because it already happened: on 2026-07-25 a capture lobo
+    # transcribed a backup passphrase and four live mailbox passwords verbatim into
+    # session journals, and this lobo pushed them. A pre-push scan HAD been run and
+    # reported clean — it looked for the `key: value` shape of a config file, and a
+    # secret written in PROSE inside a narrative matches none of that. The lesson is
+    # in the ordering below: pattern matching is the SECOND layer, not the first.
+    #
+    # Layer 1, VALUE matching, is the one that would have caught it. Read the actual
+    # secret material this machine holds and look for those exact strings in the
+    # diff. No heuristic, no entropy guessing, no false positives — if the literal
+    # value of a credential appears in something about to leave the machine, that is
+    # not a maybe.
+    #
+    # ANTARES_SECRET_SOURCES: colon-separated files/dirs holding credential material.
+    # Nothing is read from them except to compare; values never reach the log.
+    scrub_hits=""
+    diff_file=$(mktemp) || diff_file=""
+    if [[ -n "$diff_file" ]]; then
+        git diff --cached -- "${PATHS[@]}" > "$diff_file" 2>/dev/null || true
+
+        sources="${ANTARES_SECRET_SOURCES:-$HOME/.secrets:$HOME/.config}"
+        while IFS= read -r sf; do
+            [[ -f "$sf" ]] || continue
+            # whole-file values (a passphrase file) and KEY=VALUE lines alike
+            while IFS= read -r v; do
+                v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+                (( ${#v} >= 12 )) || continue
+                (( ${#v} <= 200 )) || continue
+                if grep -qF -- "$v" "$diff_file" 2>/dev/null; then
+                    scrub_hits+="  value from ${sf/#$HOME/\~} appears in the staged diff"$'\n'
+                    break
+                fi
+            done < <(
+                { cat "$sf"; sed -n 's/^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=//p' "$sf"; } 2>/dev/null \
+                  | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -v '^#' | grep -v '^$'
+            )
+        done < <(
+            IFS=':' read -ra _sd <<< "$sources"
+            for d in "${_sd[@]}"; do
+                [[ -e "$d" ]] || continue
+                find "$d" -maxdepth 3 -type f -size -64k 2>/dev/null
+            done
+        )
+
+        # Layer 2: shapes that are secrets no matter where they came from.
+        if grep -qEi -- '(ghp|gho|ghs|github_pat)_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,}|xox[bp]-[A-Za-z0-9-]{20,}|BEGIN [A-Z ]*PRIVATE KEY|AKIA[0-9A-Z]{16}' "$diff_file" 2>/dev/null; then
+            scrub_hits+="  a token/private-key shape appears in the staged diff"$'\n'
+        fi
+        rm -f "$diff_file"
+    fi
+
+    if [[ -n "$scrub_hits" ]]; then
+        # Loud and blocking. Unstage so nothing is left armed for the next run, and
+        # do NOT name the file or print the value — the log is backed up too.
+        git reset -q -- "${PATHS[@]}" 2>/dev/null || true
+        log "REFUSING TO COMMIT — scrub gate tripped:"
+        printf '%s' "$scrub_hits" | while IFS= read -r l; do [[ -n "$l" ]] && log "$l"; done
+        log "  nothing was committed or pushed. Redact the offending memory/journal by hand, then the next session start will back up normally."
+        exit 0
+    fi
+
     staged=$(git diff --cached --numstat -- "${PATHS[@]}" 2>/dev/null | wc -l)
     if (( staged == 0 )); then
         # Nothing new to commit. That is NOT a reason to leave earlier commits

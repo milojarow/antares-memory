@@ -117,6 +117,14 @@ def do_search(query, top_k=5, threshold=0.35, types="all",
                 raw_hits = []
             for hit in raw_hits:
                 all_hits.append((*hit, scope_name))
+        except sqlite3.Error as e:
+            # One broken index must not take the healthy ones with it. This block
+            # had a `finally` and no `except`, so any DB-level failure in ONE scope
+            # propagated out of the loop and discarded the hits already collected
+            # from the others. Reproduced: a query that returns 5 hits against the
+            # home scope alone returns ZERO when a second, poisoned scope is added.
+            # Partial results beat none, and the log says which scope was skipped.
+            log(f"scope {scope_name} failed, skipping it: {type(e).__name__}: {e}")
         finally:
             conn.close()
 

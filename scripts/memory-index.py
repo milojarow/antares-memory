@@ -300,6 +300,16 @@ def index_scope(model, scope_name, memory_dir):
 
     db_path = db_path_for(memory_dir)
     conn = sqlite3.connect(db_path)
+    # WAL: readers do not block on the writer, and a writer that dies does not
+    # leave a hot rollback journal that a `mode=ro` reader cannot clear. The
+    # default (`delete`) escalates to an EXCLUSIVE lock once the dirty set
+    # outgrows the page cache, which on a long run (a chunker bump, a large
+    # backlog) locks out the search daemon for the whole pass. Set by the writer
+    # because it is persistent in the DB file — readers inherit it.
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError:
+        pass
 
     version = detect_schema_version(conn)
     if version == 0:

@@ -84,12 +84,34 @@ def detect_schema_version(conn):
 
 
 def ensure_fts_table(conn, schema_version):
-    """Create FTS5 virtual table if it doesn't exist."""
+    """Create the FTS5 table if missing. NEVER at the cost of the search.
+
+    This is called from the search path, and the search path's main caller — the
+    daemon — opens every index with `mode=ro`. Building the table there raises
+    `OperationalError: attempt to write a readonly database`, and because the
+    caller never expected a write to happen here, the exception escaped the whole
+    query. Measured on one install: 418 of 1385 logged prompts (30%) returned zero
+    memories this way, and the operator could not tell it apart from "nothing
+    relevant found".
+
+    The state that triggers it is not exotic — an interrupted indexing run leaves
+    exactly that shape, because init_db() commits `memory_chunks` before the FTS
+    table is created. One killed reindex, and every later search of that scope
+    fails until someone reindexes successfully.
+
+    Creating the table is an OPTIMISATION (keyword scoring); the vector half works
+    without it, and the FTS query below is already wrapped to degrade. So a failure
+    to create is reported, not raised. The indexer, which owns the write
+    connection, is what actually builds this table.
+
+    Returns True if keyword search is available.
+    """
     tables = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_fts'"
     ).fetchone()
-
-    if not tables:
+    if tables:
+        return True
+    try:
         if schema_version == 2:
             conn.execute(
                 "CREATE VIRTUAL TABLE memory_fts USING fts5("
@@ -111,6 +133,11 @@ def ensure_fts_table(conn, schema_version):
                 "SELECT rowid, title, content FROM memory_embeddings"
             )
         conn.commit()
+        return True
+    except sqlite3.OperationalError:
+        # Read-only connection, or another writer holds the DB. Either way this is
+        # not the caller's problem to die of: fall back to vector-only.
+        return False
 
 
 def search_v2(conn, query_embedding, query_text, type_filter, top_n,
