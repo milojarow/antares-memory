@@ -32,6 +32,14 @@ try {
       effort,
       settingSources: [],                                  // isolated: no persona bias
       systemPrompt: policy,
+      // `tools` is the AVAILABILITY filter; `allowedTools` only auto-approves.
+      // Without it the lobo runs with the FULL built-in toolset. Probed live:
+      // Agent, Bash, Edit, Read, ReportFindings, ScheduleWakeup, Skill,
+      // ToolSearch, Workflow, Write — Agent and Workflow being the recursion
+      // vectors behind a 101-session fork bomb on one install.
+      // Bash stays because it is load-bearing: the lobos append to a journal or
+      // changelog with `cat >> file <<EOF` rather than re-reading a large file.
+      tools: ["Read", "Grep", "Glob", "Write", "Edit", "Bash"],
       allowedTools: ["Read", "Grep", "Glob", "Write", "Edit"], // Read delta + Grep base (dedup) + Write/Edit memories
       permissionMode: "bypassPermissions",
       maxTurns: 30,
