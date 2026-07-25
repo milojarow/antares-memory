@@ -59,9 +59,13 @@ Keep `MEMORY.md` short — it's overhead per prompt. Use it for directives you w
 ### Where "global" lives, and the one variable that decides it
 
 The canonical global store is the `$HOME` slug. An install that predates that
-layout can point elsewhere with **`ANTARES_GLOBAL_MEMORY_DIR`**, and both halves
-of the system read it: `lib/common.sh` (`antares_home_memory_dir`) and
-`lib/common.py` (`home_memory_dir`).
+layout can point elsewhere, and both halves of the system resolve it the same
+way — `lib/common.sh` (`antares_home_memory_dir`) and `lib/common.py`
+(`home_memory_dir`), in this order:
+
+1. `$ANTARES_GLOBAL_MEMORY_DIR`
+2. `$XDG_CONFIG_HOME/antares-memory/global-memory-dir` — a file holding the path
+3. the `$HOME` slug
 
 They MUST agree. For a period they did not — the shell honoured the override and
 the Python did not — which made `./install.sh` a landmine on the affected
@@ -70,13 +74,33 @@ the real store, 550+ memories, sat untouched. No error, no missing file, just
 retrieval quietly returning nothing relevant. If you add a third consumer of the
 global path, teach it this variable in the same commit.
 
-Set it in the **systemd user environment**, not a shell rc: the search daemon and
-every hook are children of systemd, not of an interactive shell.
+**Set it in the file. `install.sh` writes it for you** whenever the resolved
+store is not the canonical slug:
 
 ```
-# ~/.config/environment.d/30-antares-memory.conf
-ANTARES_GLOBAL_MEMORY_DIR=/home/you/.claude/memory-jarvis
+# $XDG_CONFIG_HOME/antares-memory/global-memory-dir
+/home/you/.claude/memory-jarvis
 ```
+
+An earlier version of this document told you to set the variable in the systemd
+user environment instead, "because the daemon and every hook are children of
+systemd". Half of that is true and it is the wrong half. The daemon is a systemd
+service. The hooks and the lobos are children of the **Claude Code process**,
+which descends from a terminal, a compositor, and a login session — an
+environment fixed at login and not amendable afterwards.
+
+So a variable added to `environment.d` after that login reaches the daemon and
+none of the rest. Measured on the machine that produced this note: 15
+Claude-descendant processes without the variable, the daemon with it, `systemctl
+--user show-environment` displaying it the whole time. Search resolved the real
+store while indexing and the capture lobos resolved the empty slug dir — no
+error on either side, and the installer's own first index pass indexed the wrong
+store. It heals on the next full re-login, which means the symptom disappears
+without the cause being understood.
+
+A file has no inheritance to lose: it is read at the moment of use, by whichever
+process needs it. The variable still wins when set — useful for one-off runs and
+for pointing a single command at a different store.
 
 The override exists so an install can stay on the canonical SCRIPTS while keeping
 a non-canonical STORE. Forking the scripts instead is what produced the worst bug

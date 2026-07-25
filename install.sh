@@ -110,7 +110,32 @@ HOME_MEMORY_DIR="$(antares_home_memory_dir)"
 mkdir -p "$HOME_MEMORY_DIR/journal"
 mkdir -p "$ANTARES_STATE/logs"
 mkdir -p "$(dirname "$ANTARES_VENV")"
-ok "$HOME_MEMORY_DIR (HOME slug memory store)"
+
+# A global store that is NOT the canonical slug gets written to a config file, so
+# every consumer resolves it the same way without depending on the environment.
+#
+# Setting only $ANTARES_GLOBAL_MEMORY_DIR is not enough and the failure is silent.
+# The daemon is a systemd service and inherits the user manager's environment; the
+# hooks and the lobos are children of the Claude Code process, which inherited its
+# own environment at login. Add the variable to environment.d after that login and
+# you get a system where `systemctl --user show-environment` shows it, the daemon
+# honours it, and every hook resolves the canonical slug instead — search reading
+# one store while indexing writes another, with no error on either side. It looks
+# fixed after a re-login, which is the worst way for a cause to disappear.
+CANONICAL_HOME_MEMORY_DIR="$(antares_memory_dir_for "$HOME")"
+GLOBAL_DIR_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/antares-memory/global-memory-dir"
+if [[ "$HOME_MEMORY_DIR" != "$CANONICAL_HOME_MEMORY_DIR" ]]; then
+    mkdir -p "$(dirname "$GLOBAL_DIR_CONF")"
+    cat > "$GLOBAL_DIR_CONF" <<EOF
+# antares-memory: this machine's GLOBAL memory store.
+# Read by lib/common.sh and lib/common.py when \$ANTARES_GLOBAL_MEMORY_DIR is unset.
+# Written by install.sh. One absolute path; '#' comments and blank lines ignored.
+$HOME_MEMORY_DIR
+EOF
+    ok "$HOME_MEMORY_DIR (global memory store — non-canonical, recorded in $GLOBAL_DIR_CONF)"
+else
+    ok "$HOME_MEMORY_DIR (global memory store — HOME slug)"
+fi
 ok "$ANTARES_STATE (logs)"
 
 MEMORY_INDEX="$HOME_MEMORY_DIR/MEMORY.md"

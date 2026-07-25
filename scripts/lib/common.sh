@@ -53,22 +53,58 @@ antares_memory_dir_for() {
 }
 
 # The GLOBAL memory dir. Defaults to the $HOME slug, which is the canonical
-# layout; ANTARES_GLOBAL_MEMORY_DIR overrides it.
+# layout; an override points elsewhere, in this precedence:
+#
+#   1. $ANTARES_GLOBAL_MEMORY_DIR
+#   2. $XDG_CONFIG_HOME/antares-memory/global-memory-dir  (a file holding the path)
+#   3. the $HOME slug
 #
 # The override is not a nicety, it is what lets one install keep a store that
 # predates the slug layout without forking these scripts. Its Python twin in
-# common.py reads the same variable — the two halves MUST agree on where
-# "global" is, and for a while they did not: the shell side had the override and
-# the Python side did not, so an installer run would have repointed indexing and
-# search at an empty slug dir while the real store sat untouched. Every memory
-# still on disk, none of them findable, and no error anywhere.
+# common.py reads both sources in the same order — the two halves MUST agree on
+# where "global" is, and for a while they did not: the shell side had the
+# override and the Python side did not, so an installer run would have repointed
+# indexing and search at an empty slug dir while the real store sat untouched.
+# Every memory still on disk, none of them findable, and no error anywhere.
 #
-# If you add a third consumer, teach it this variable too.
+# THE FILE EXISTS BECAUSE THE ENVIRONMENT VARIABLE ALONE DOES NOT REACH THE
+# CONSUMERS. This was documented as "set it in the systemd user environment, the
+# hooks are children of systemd" — which is false, and measurably so. Only the
+# daemon is a child of systemd. Every hook and every lobo is a child of the
+# Claude Code process, which is a child of the terminal, the compositor, and the
+# login session: a process tree that inherited its environment at login and
+# cannot be amended afterwards. On the machine that shipped this, `environment.d`
+# was written at 00:38 and the session had started six days earlier — so
+# `systemctl --user show-environment` displayed the variable, the daemon had it,
+# and all 15 Claude-descendant processes did not. Search (daemon) resolved the
+# real store while indexing and the lobos (hooks) resolved the empty slug dir.
+# The split survives a terminal restart and only heals on a full re-login, which
+# is exactly the kind of "fixed itself" that hides the cause.
+#
+# A file is read at the moment of use by whoever needs it, so it has no
+# inheritance to lose. Keep the variable first: it stays useful for one-off runs
+# and for overriding a machine's default in a single command.
+#
+# If you add a third consumer, teach it this resolution too.
 antares_home_memory_dir() {
     if [[ -n "${ANTARES_GLOBAL_MEMORY_DIR:-}" ]]; then
         printf '%s' "$ANTARES_GLOBAL_MEMORY_DIR"
         return
     fi
+
+    local conf="${XDG_CONFIG_HOME:-$HOME/.config}/antares-memory/global-memory-dir"
+    if [[ -r "$conf" ]]; then
+        local line
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            line="${line%$'\r'}"
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            [[ -z "$line" || "$line" == '#'* ]] && continue
+            printf '%s' "$line"
+            return
+        done < "$conf"
+    fi
+
     antares_memory_dir_for "$HOME"
 }
 

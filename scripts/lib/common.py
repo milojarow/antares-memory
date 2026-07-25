@@ -48,24 +48,58 @@ def memory_dir_for(cwd):
     return os.path.join(ANTARES_PROJECTS_DIR, slugify(cwd), "memory")
 
 
+GLOBAL_DIR_CONF = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"),
+    "antares-memory",
+    "global-memory-dir",
+)
+
+
+def _global_dir_from_conf():
+    """First non-comment, non-blank line of GLOBAL_DIR_CONF, or None."""
+    try:
+        with open(GLOBAL_DIR_CONF, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    return line
+    except OSError:
+        pass
+    return None
+
+
 def home_memory_dir():
     """The 'global' memory dir — Claude Code loads its MEMORY.md when cwd == $HOME.
 
-    Honours ANTARES_GLOBAL_MEMORY_DIR, matching lib/common.sh. Installs that
-    predate the slug layout keep their global store elsewhere, and their shell
-    side already reads this variable — the Python side did not, so the two halves
-    of the same system disagreed about where "global" is.
+    Resolution, matching lib/common.sh exactly:
+
+        1. $ANTARES_GLOBAL_MEMORY_DIR
+        2. the path in $XDG_CONFIG_HOME/antares-memory/global-memory-dir
+        3. the $HOME slug
+
+    Installs that predate the slug layout keep their global store elsewhere, and
+    their shell side already read the variable — the Python side did not, so the
+    two halves of the same system disagreed about where "global" is.
 
     That is not cosmetic: install.sh copies these scripts over the live ones, so
     running the documented update path (`git pull && ./install.sh`) on such a
     machine would silently repoint indexing and search at an empty slug dir while
     the real store sat untouched — every memory still on disk, none of them
     findable, and no error anywhere.
+
+    The config file is the durable half of the answer. The variable was meant to
+    be set in the systemd user environment, on the premise that "the hooks are
+    children of systemd" — they are not. Only the daemon is. The hooks and lobos
+    descend from the Claude Code process, whose environment was fixed at login,
+    so a variable added to environment.d afterwards reaches the daemon and none
+    of them: search resolves one store, indexing resolves another, and nothing
+    reports a problem. A file is read when it is used, so it cannot be missed
+    that way. See the long note in lib/common.sh for the measured case.
     """
     override = os.environ.get("ANTARES_GLOBAL_MEMORY_DIR")
     if override:
         return override
-    return memory_dir_for(HOME)
+    return _global_dir_from_conf() or memory_dir_for(HOME)
 
 
 def db_path_for(memory_dir):
