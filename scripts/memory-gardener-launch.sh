@@ -132,16 +132,24 @@ log "LAUNCH gardener (background) cwd=$cwd memories=$n_mem model=${ANTARES_GARDE
     # FULL backup of the base before the gardener can merge/flag anything.
     mkdir -p "$BACKUP_DIR" 2>/dev/null || true
     stamp=$(date +%Y%m%d-%H%M%S)
-    tar czf "$BACKUP_DIR/base.$stamp.tar.gz" -C "$home_dir" . 2>/dev/null || true
+    # The .memory-index.db is EXCLUDED: it is 13.7 MB of regenerable embeddings
+    # and it was the bulk of every snapshot (9.6 MB compressed for a store whose
+    # actual text is a fraction of that). A backup of memories should hold the
+    # memories; the index is rebuilt by one reindex run.
+    tar czf "$BACKUP_DIR/base.$stamp.tar.gz" --exclude='./.memory-index.db*' \
+        -C "$home_dir" . 2>/dev/null || true
     # The digest above hands the lobo the per-cwd store as well when cwd != $HOME,
     # so it can merge and rewrite memories there — but the backup only ever covered
     # the global store, leaving those edits with no local recovery path. Back up
     # whatever the lobo was actually shown, not just the part we remembered.
     if [[ "$current_dir" != "$home_dir" && -d "$current_dir" ]]; then
         tar czf "$BACKUP_DIR/project-$(basename "$(dirname "$current_dir")").$stamp.tar.gz" \
-            -C "$current_dir" . 2>/dev/null || true
+            --exclude='./.memory-index.db*' -C "$current_dir" . 2>/dev/null || true
     fi
-    ls -1t "$BACKUP_DIR"/base.*.tar.gz 2>/dev/null | tail -n +6 | xargs -r rm -f  # keep last 5
+    # BOTH families rotate. Only base.* did, so project-*.tar.gz accumulated with
+    # nothing ever removing them — one more file per gardener run, forever.
+    ls -1t "$BACKUP_DIR"/base.*.tar.gz    2>/dev/null | tail -n +6 | xargs -r rm -f  # keep last 5
+    ls -1t "$BACKUP_DIR"/project-*.tar.gz 2>/dev/null | tail -n +6 | xargs -r rm -f  # keep last 5
 
     antares_lobo_env "$home_dir${current_dir:+:$current_dir}:$ANTARES_STATE"
     out=$(printf '%s' "$task" | env -i "${ANTARES_LOBO_ENV[@]}" \
@@ -181,7 +189,7 @@ log "LAUNCH gardener (background) cwd=$cwd memories=$n_mem model=${ANTARES_GARDE
     # merge a project duplicate into a survivor and then be refused when it asked
     # for the husk to be removed. Content consolidated, redundant file left behind,
     # and the next run does the same work again. Reproduced against this exact
-    # validator: "REFUSE out-of-scope path: .../-home-endymion-<project>/memory/
+    # validator: "REFUSE out-of-scope path: .../-home-<user>-<project>/memory/
     # dup-dos.md", deleted=0, file still on disk. The per-cwd store is backed up
     # above alongside the global one, so a deletion here has the same recovery path.
     deleted=0

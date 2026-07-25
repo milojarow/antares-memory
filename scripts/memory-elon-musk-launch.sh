@@ -106,7 +106,14 @@ PATHS=("${present[@]}")
 # REPORTING line killed the backup lobo before it committed anything, and it did so
 # in the trap's own voice: a clean exit, no log line, nothing to notice. A
 # diagnostic that reports on a directory's absence must not itself die of it.
-uncovered=$(find "$HOME/projects" -maxdepth 3 -type d -path '*/.claude/memory' 2>/dev/null | head -5 || true)
+# Scanned from $HOME, not from $HOME/projects. A walk-up store lives wherever the
+# operator keeps repos — ~/src, ~/work, a bare checkout in $HOME — and ~/projects
+# is a convention on some machines and absent on others (it does not exist on this
+# one), so the diagnostic reported nothing anywhere it mattered. maxdepth 4 keeps
+# it cheap: measured at 136 ms here, once per run, in a background lobo. The native
+# layout .claude/projects/<slug>/memory does not match '*/.claude/memory', so this
+# still reports only the stores that really are outside the backup.
+uncovered=$(find "$HOME" -maxdepth 4 -type d -path '*/.claude/memory' 2>/dev/null | head -5 || true)
 if [[ -n "$uncovered" ]]; then
     log "UNCOVERED walk-up store(s) outside this repo, not backed up here: $(printf '%s ' $uncovered)"
 fi

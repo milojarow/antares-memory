@@ -41,7 +41,7 @@ try {
       // vectors behind a 101-session fork bomb on one install.
       // Bash stays because it is load-bearing: the lobos append to a journal or
       // changelog with `cat >> file <<EOF` rather than re-reading a large file.
-      // Bash REMOVED (selene, 2026-07-25). Zero occurrences of "append" in this
+      // Bash REMOVED (2026-07-25). Zero occurrences of "append" in this
       // lobo's policy prompt: it edits MEMORY.md in place (Edit) and Writes a
       // changelog. Nothing here needs a shell.
       tools: ["Read", "Edit", "Write"],

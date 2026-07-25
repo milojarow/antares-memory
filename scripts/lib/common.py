@@ -72,8 +72,8 @@ def slugify(path):
     created on the host where this was found, this rule explains 19, while the
     slash-only rule explains 16. The three it got wrong were dots and underscores:
 
-        ~/.claude/agents-sdk  -> -home-endymion--claude-agents-sdk
-        ~/skills-dev/_inbox   -> -home-endymion-skills-dev--inbox
+        ~/.claude/agents-sdk  -> -home-<user>--claude-agents-sdk
+        ~/skills-dev/_inbox   -> -home-<user>-skills-dev--inbox
 
     Getting those wrong is not cosmetic. It points the whole system at a directory
     Claude Code never fills: the `current` scope finds nothing, and an incremental

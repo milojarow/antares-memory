@@ -51,6 +51,8 @@ advance_watermark() {
     return 1
 }
 
+antares_trim_logs
+
 input=$(cat)
 transcript_path=$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2>/dev/null || true)
 session_id=$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null || true)

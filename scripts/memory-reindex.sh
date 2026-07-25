@@ -123,6 +123,21 @@ needs_reindex() {
                    "SELECT value FROM metadata WHERE key='chunker_version'" 2>/dev/null || true)
             [[ "$have" != "$want" ]] && return 0
         fi
+
+        # (4) The index was written by a DIFFERENT EMBEDDING MODEL than the one that
+        #     will query it. Every stored vector then lives in another space and
+        #     cosine similarity against them is noise — not degraded, meaningless —
+        #     while search still returns its top five and reports nothing wrong.
+        #     The indexer has always stamped 'model_name' into the DB, and until now
+        #     NOTHING read it: the one fact that identifies this failure was on disk
+        #     the whole time, unused. It matters here specifically because this host
+        #     runs a vocab-pruned copy of the model, so the value genuinely changes.
+        have=$(sqlite3 -readonly "$db" \
+               "SELECT value FROM metadata WHERE key='model_name'" 2>/dev/null || true)
+        if [[ -n "$have" && "$have" != "$ANTARES_MODEL" ]]; then
+            antares_log "$LOG_FILE" "MODEL CHANGED for $mdir: index built with '$have', now using '$ANTARES_MODEL' — full re-embed"
+            return 0
+        fi
     fi
 
     return 1

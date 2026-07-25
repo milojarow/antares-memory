@@ -80,8 +80,8 @@ antares_slugify() {
     # slash-only rule explains 16. The three it got wrong are dots and
     # underscores —
     #
-    #   ~/.claude/agents-sdk  -> -home-endymion--claude-agents-sdk   (not -.claude-)
-    #   ~/skills-dev/_inbox   -> -home-endymion-skills-dev--inbox    (not -_inbox)
+    #   ~/.claude/agents-sdk  -> -home-<user>--claude-agents-sdk   (not -.claude-)
+    #   ~/skills-dev/_inbox   -> -home-<user>-skills-dev--inbox    (not -_inbox)
     #
     # — and getting them wrong points the whole system at a directory Claude Code
     # never fills: the `current` scope finds nothing, and an incremental reindex
@@ -250,6 +250,35 @@ antares_lobo_env() {
 }
 
 # Stable log helper. Usage: antares_log <file> <msg...>
+# Keep the log dir from growing without a ceiling. Nothing ever rotated these:
+# they are plain append-only files written by every hook and every lobo, and on a
+# long-lived install the search log alone had reached 683 KB with no mechanism
+# that would ever have stopped it. Trimming keeps the RECENT half, which is the
+# half anyone reads when something just broke.
+#
+# Called from the SessionEnd launcher, deliberately NOT from this file's top
+# level: common.sh is sourced by the UserPromptSubmit hook, which runs on every
+# single prompt, and a `stat` per log file there is a fork per prompt for a
+# problem that moves on the scale of weeks.
+antares_trim_logs() {
+    local dir="$ANTARES_STATE/logs" max=${ANTARES_MAX_LOG_BYTES:-2097152} f sz keep tmp
+    [[ -d "$dir" ]] || return 0
+    for f in "$dir"/*.log; do
+        [[ -f "$f" ]] || continue
+        sz=$(stat -c %s "$f" 2>/dev/null || echo 0)
+        (( sz > max )) || continue
+        keep=$(( max / 2 ))
+        tmp="$f.trim.$$"
+        if tail -c "$keep" "$f" > "$tmp" 2>/dev/null; then
+            printf '[%s] --- trimmed: %s B dropped, keeping the most recent %s B ---\n' \
+                "$(date -Iseconds)" "$(( sz - keep ))" "$keep" >> "$tmp"
+            mv -f "$tmp" "$f" 2>/dev/null || rm -f "$tmp"
+        else
+            rm -f "$tmp"
+        fi
+    done
+}
+
 antares_log() {
     local log_file="$ANTARES_STATE/logs/$1"
     shift

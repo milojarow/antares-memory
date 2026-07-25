@@ -43,7 +43,7 @@ try {
       // vectors behind a 101-session fork bomb on one install.
       // Bash stays because it is load-bearing: the lobos append to a journal or
       // changelog with `cat >> file <<EOF` rather than re-reading a large file.
-      // Bash REMOVED (selene, 2026-07-25). This lobo's own policy prompt says
+      // Bash REMOVED (2026-07-25). This lobo's own policy prompt says
       // verbatim: "you do NOT have a delete tool and you do NOT run shell
       // commands" — handing it Bash contradicted the system prompt it runs under.
       // Its only write targets are the deletions LIST and a changelog, both plain
