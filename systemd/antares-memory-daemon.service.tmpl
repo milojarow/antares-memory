@@ -16,5 +16,24 @@ Environment=ANTARES_STATE=@ANTARES_STATE@
 MemoryMax=1500M
 TasksMax=64
 
+# This daemon is LATENCY-critical and tiny: a query needs a few hundred ms of CPU,
+# a handful of times a minute. Everything it competes with — editor sessions, a
+# browser, the capture lobos — is batch work that does not care about 300 ms.
+#
+# At the default weight it competes on equal terms and loses. Measured on a host
+# with 8 cores at load 7.97 (CPU pressure some/avg10 = 34%): a query whose median
+# is 177 ms on an idle machine took 4,183 ms of wall clock and blew the hook's
+# 4 s budget, so that prompt reached the model with ZERO memories attached — and
+# nothing anywhere says so. It is not a slow daemon, it is a starved one; the
+# same host answered 60 replayed queries with a 1,448 ms maximum when idle.
+#
+# Raising the budget does not fix it (the hook's own timeout is the ceiling, and
+# a saturated machine will blow any budget). Nice= is not available either: user
+# units run with RLIMIT_NICE=0, so they cannot go below 0. CPUWeight is the one
+# lever that works unprivileged — it only takes effect UNDER contention, which is
+# exactly and only when this matters. systemd enables the cpu controller on the
+# parent slice on its own once a unit asks for this.
+CPUWeight=500
+
 [Install]
 WantedBy=default.target
