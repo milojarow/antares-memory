@@ -73,7 +73,21 @@ mkdir -p "$ANTARES_STATE/logs" 2>/dev/null || true
 # Empirically: '/' → '-'. Edge cases (paths inside ~/.claude/ itself) may not
 # round-trip perfectly, but those are not normal operator working dirs.
 antares_slugify() {
-    printf '%s' "$1" | tr '/' '-'
+    # EVERY non-alphanumeric character becomes '-', not just '/'.
+    #
+    # Derived from ground truth rather than from the docs: of the 21 slug dirs
+    # Claude Code itself created on this host, this rule explains 19, while the
+    # slash-only rule explains 16. The three it got wrong are dots and
+    # underscores —
+    #
+    #   ~/.claude/agents-sdk  -> -home-endymion--claude-agents-sdk   (not -.claude-)
+    #   ~/skills-dev/_inbox   -> -home-endymion-skills-dev--inbox    (not -_inbox)
+    #
+    # — and getting them wrong points the whole system at a directory Claude Code
+    # never fills: the `current` scope finds nothing, and an incremental reindex
+    # creates and indexes an empty phantom while the real store is never embedded.
+    # rc=0 and a normal banner throughout.
+    printf '%s' "$1" | tr -c 'A-Za-z0-9' '-'
 }
 
 # memory dir for a given cwd. Does NOT create — pure path computation.

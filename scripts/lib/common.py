@@ -19,6 +19,7 @@ Import from sibling scripts:
 """
 
 import os
+import re
 
 HOME = os.path.expanduser("~")
 
@@ -64,12 +65,24 @@ ANTARES_PROJECTS_DIR = os.path.join(HOME, ".claude", "projects")
 
 
 def slugify(path):
-    """Replicate Claude Code's cwd → slug convention.
+    """Replicate Claude Code's cwd -> slug convention.
 
-    Empirically: '/' → '-'. Edge cases inside ~/.claude/ itself may not
-    round-trip perfectly, but those are not normal operator working dirs.
+    EVERY non-alphanumeric character becomes '-', not only '/'. Derived from
+    ground truth rather than assumed: of the 21 slug dirs Claude Code itself had
+    created on the host where this was found, this rule explains 19, while the
+    slash-only rule explains 16. The three it got wrong were dots and underscores:
+
+        ~/.claude/agents-sdk  -> -home-endymion--claude-agents-sdk
+        ~/skills-dev/_inbox   -> -home-endymion-skills-dev--inbox
+
+    Getting those wrong is not cosmetic. It points the whole system at a directory
+    Claude Code never fills: the `current` scope finds nothing, and an incremental
+    reindex happily creates and indexes that empty phantom while the real store is
+    never embedded — rc=0 and a normal banner the entire time.
+
+    Must stay identical to antares_slugify() in common.sh.
     """
-    return path.replace("/", "-")
+    return re.sub(r"[^A-Za-z0-9]", "-", path)
 
 
 def memory_dir_for(cwd):

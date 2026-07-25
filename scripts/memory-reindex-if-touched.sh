@@ -41,11 +41,15 @@ esac
 rest="${file_path#"$ANTARES_PROJECTS_DIR"/}"   # <slug>/memory/<rest>
 slug="${rest%%/memory/*}"
 
-# Reverse slugify: '-' → '/'. Lossy at edges; for our use the recovered cwd
-# only needs to make memory_dir_for(cwd) match the original slug, which the
-# indexer recomputes anyway. We just need ANY cwd that slugifies to <slug>.
-cwd="/${slug//-/'/'}"
-cwd="${cwd//\/\//\/}"   # collapse accidental double slashes
+# NO reverse slugify. There used to be one here ('-' back to '/'), and it cannot
+# be made correct: slugify collapses EVERY non-alphanumeric character to '-', so a
+# '-' in a slug may have been '/', '.', '_' or a literal '-'. `mosh-osc52` came
+# back as `mosh/osc52`, and any dotdir came back wrong too — the reconstructed cwd
+# then re-derived a DIFFERENT slug, so the indexer was pointed at a directory
+# Claude Code never fills while the real store went unindexed. rc=0 throughout.
+#
+# The round-trip was never needed: this hook already holds the real path. It is
+# passed straight through with --memory-dir.
 
 # Skip MEMORY.md itself (always-loaded index, not indexed content).
 [[ "$(basename "$file_path")" == "MEMORY.md" ]] && exit 0
@@ -69,7 +73,7 @@ target_dir="$ANTARES_PROJECTS_DIR/$slug/memory"
 if [[ "$target_dir" == "$(antares_home_memory_dir)" ]]; then
     scope_args=(--scope home)
 else
-    scope_args=(--scope current --cwd "$cwd")
+    scope_args=(--memory-dir "$target_dir")
 fi
 
 # Async reindex of just the affected slug.

@@ -486,6 +486,14 @@ def main():
              "'all' = home + current (deduped if same).",
     )
     parser.add_argument(
+        "--memory-dir",
+        default=None,
+        help="Index THIS memory dir directly. Skips the cwd -> slug round-trip "
+             "entirely, which is the point: slugify is lossy (every "
+             "non-alphanumeric collapses to '-'), so a caller that already holds "
+             "the real path must never be made to invent a cwd that re-derives it.",
+    )
+    parser.add_argument(
         "--cwd",
         default=os.getcwd(),
         help="Working directory used to resolve current scope (default: $PWD).",
@@ -502,7 +510,11 @@ def main():
         )
         sys.exit(1)
 
-    scopes = get_scopes(args.scope, args.cwd)
+    if args.memory_dir:
+        scopes = [(f"dir:{os.path.basename(os.path.dirname(args.memory_dir))}",
+                   args.memory_dir)]
+    else:
+        scopes = get_scopes(args.scope, args.cwd)
 
     if not scopes:
         print(f"No memory directories resolved for scope '{args.scope}' "
