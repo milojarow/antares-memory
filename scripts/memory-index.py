@@ -341,11 +341,27 @@ def index_scope(model, scope_name, memory_dir):
     updated = 0
 
     for filepath in files:
-        mtime = os.path.getmtime(filepath)
-        if not rechunk_all and not needs_update(conn, filepath, mtime):
-            continue
 
-        content, title = extract_content(filepath)
+        # One unreadable file must not cost the whole pass. Without this, a single
+        # .md that cannot be decoded or opened — latin-1 bytes, a dangling symlink,
+        # a mode-000 file — raised out of the loop and aborted indexing entirely:
+        # every healthy file left unindexed, the embedding work discarded, and
+        # (because init_db() has already committed) the DB left WITHOUT its FTS
+        # table. That is precisely the state that makes every search of the scope
+        # fail, so the blackout became permanent: the next run died on the same file.
+        # Reproduced in all three variants; the healthy file was absent every time.
+        try:
+            # getmtime is INSIDE the guard: a dangling symlink raises here, before
+            # the file is ever opened, and that was the failure that still aborted
+            # the pass after the read itself had been guarded.
+            mtime = os.path.getmtime(filepath)
+            if not rechunk_all and not needs_update(conn, filepath, mtime):
+                continue
+            content, title = extract_content(filepath)
+        except (OSError, UnicodeDecodeError, ValueError) as e:
+            print(f"[{scope_name}] SKIPPING unreadable file: {filepath}: "
+                  f"{type(e).__name__}: {e}", flush=True)
+            continue
         # Same content gate the INJECTOR already applies. memory-journal-init.sh
         # writes a 36-byte stub (`# Journal: <date>` + `## Sessions`) on every
         # session-start day and then refuses to inject it, because it knows the file
@@ -384,6 +400,12 @@ def index_scope(model, scope_name, memory_dir):
                 (filepath, i, chunk_content, embedding_blob, mtime, file_type, title),
             )
         updated += 1
+        # Commit in batches. The pass used to commit exactly once at the end, so any
+        # hard stop — OOM, SIGKILL, power — discarded every embedding computed so
+        # far and left the DB in the no-FTS state described above. WAL makes these
+        # cheap.
+        if updated % 25 == 0:
+            conn.commit()
 
     existing = set(files)
     db_files = set(
