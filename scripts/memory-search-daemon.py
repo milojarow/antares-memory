@@ -63,6 +63,32 @@ def do_search(query, top_k=5, threshold=0.35, types="all",
     if not db_paths:
         return {"ok": False, "error": "no_dbs", "scope": scope, "cwd": cwd}
 
+    # Bound the query before it reaches the model. Latency here scales with the
+    # LENGTH OF THE PROMPT, not with the size of the corpus, and it does so
+    # superlinearly. Measured on this install: 227 chars -> 173ms, 6.8 KB ->
+    # 1294ms, 27 KB -> 22142ms.
+    #
+    # 22 seconds is not a slow query, it is a hook that will be killed: the caller
+    # allows 4s. So the prompts that most need memory — a pasted document, a long
+    # task notification, an operator dumping a report in — are precisely the ones
+    # guaranteed to receive none, and the failure looks identical to "nothing
+    # relevant found". Raising the caller's budget cannot fix a 22-second query.
+    #
+    # Truncating costs nothing: the embedding model reads at most 128 tokens, so
+    # everything past that was already discarded for the vector, and keyword
+    # matching does not improve past a few hundred terms. Verified on a 7 KB query
+    # at caps of 1000/2000/4000/8000 chars — identical top hits at every cap,
+    # latency from 2025ms down to 337ms. 4000 leaves any ordinary prompt untouched
+    # and bounds the worst case near 600ms.
+    max_chars = int(os.environ.get("ANTARES_MAX_QUERY_CHARS", "4000"))
+    truncated_from = 0
+    if max_chars > 0 and len(query) > max_chars:
+        truncated_from = len(query)
+        query = query[:max_chars]
+        # Logged, never silent: a cap nobody can see is the same class of bug as
+        # the timeout it prevents.
+        log(f"query truncated {truncated_from} -> {max_chars} chars")
+
     model = get_model()
     embedding = model.encode(query, normalize_embeddings=True)
 
