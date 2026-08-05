@@ -50,6 +50,14 @@ fi
 home_dir="$(antares_home_memory_dir)"
 mem_index="$home_dir/MEMORY.md"
 changelog="$home_dir/.index-changelog.md"
+# The lobo writes ONE RUN here; the launcher appends it to the permanent
+# changelog. Handing it $changelog directly — with a prompt that said "overwrite
+# the changelog path" — put the only audit trail of MEMORY.md one mis-aimed Write
+# away from gone, and the three entries it holds survived only because the model
+# declined to follow its own instruction. MEMORY.md itself has rotated backups
+# below; the changelog has none and reconstructs from nowhere.
+# Same fix the gardener already carries (memory-gardener-launch.sh:37).
+CL_ENTRY="$ANTARES_STATE/curator-changelog-entry.md"
 today=$(date +%Y-%m-%d)
 
 # Digest: filename + frontmatter description of every memory (NOT bodies).
@@ -71,7 +79,7 @@ $index_body
 == ALL MEMORIES ($n_mem total — filename: description) ==
 $digest
 
-Apply promotions/demotions directly to $mem_index per your policy (conservative on removal — when unsure, KEEP). Write a changelog of what you changed and why to $changelog. Update your memory at $PREFS if you learned anything. The memory files live in $home_dir."
+Apply promotions/demotions directly to $mem_index per your policy (conservative on removal — when unsure, KEEP). Write THIS RUN's changelog entry — what you changed and why — to $CL_ENTRY (single Write, just this run; the launcher appends it to the permanent changelog. Do NOT open $changelog yourself). Update your memory at $PREFS if you learned anything. The memory files live in $home_dir."
 
 log "LAUNCH index-curator (background) cwd=$cwd memories=$n_mem model=${ANTARES_CURATOR_MODEL:-opus}"
 (
@@ -85,12 +93,27 @@ log "LAUNCH index-curator (background) cwd=$cwd memories=$n_mem model=${ANTARES_
         # Keep only the last 10 backups.
         ls -1t "$BACKUP_DIR"/MEMORY.md.* 2>/dev/null | tail -n +11 | xargs -r rm -f
     fi
+    # Truncate the entry file INSIDE the lock: a stale entry from a previous run
+    # would otherwise be appended a second time.
+    : > "$CL_ENTRY"
     antares_lobo_env "$home_dir:$ANTARES_STATE"
     out=$(printf '%s' "$task" | env -i "${ANTARES_LOBO_ENV[@]}" \
         timeout "${ANTARES_CURATOR_TIMEOUT:-420}" \
         node "$SCRIPT_DIR/../agents-sdk/index-curator.mjs" 2>>"$LOG")
     rc=$?
     result=$(printf '%s' "$out" | jq -r '.result // empty' 2>/dev/null | head -c 1000)
+    # Append this run's entry. The permanent changelog is only ever appended to,
+    # and the append is verified by size so a silent failure cannot pass as done.
+    if [[ -s "$CL_ENTRY" ]]; then
+        cl_before=$(stat -c %s "$changelog" 2>/dev/null || echo 0)
+        { printf '\n'; cat "$CL_ENTRY"; printf '\n'; } >> "$changelog" 2>>"$LOG"
+        cl_after=$(stat -c %s "$changelog" 2>/dev/null || echo 0)
+        if (( cl_after > cl_before )); then
+            log "CHANGELOG appended $(( cl_after - cl_before ))B (${cl_before}B -> ${cl_after}B)"
+        else
+            log "CHANGELOG append FAILED (${cl_before}B -> ${cl_after}B) — entry kept at $CL_ENTRY"
+        fi
+    fi
     # Stamp the gate ONLY on success — a failed run (rc!=0) must NOT block the 7d gate; retry next close.
     if (( rc == 0 )); then echo "$now" > "$STAMP"; else log "curator rc=$rc — gate NOT stamped, retries next close"; fi
     log "DONE rc=$rc result=$result"

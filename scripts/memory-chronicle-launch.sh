@@ -318,7 +318,12 @@ Per your policy: durable lessons/facts only, conservative, never the journal nor
         node "$SCRIPT_DIR/../agents-sdk/cronista.mjs" 2>>"$LOG")
     c_rc=$?
     c_res=$(printf '%s' "$c_out" | jq -r '.result // empty' 2>/dev/null | head -c 300)
-    log "CRONISTA rc=$c_rc result=$c_res"
+    # session= is load-bearing, not decoration: the lock is per session BY DESIGN,
+    # so closes run in parallel — 8 in 105 seconds on 2026-08-02. Without the id,
+    # a failure line cannot be attributed to the session that produced it, and the
+    # audit that found the stranded deltas could not tell which of 15 runs lost
+    # their distillation.
+    log "CRONISTA rc=$c_rc session=$session_id result=$c_res"
 
     # Advance the watermark after the cronista (the journal is the primary capture).
     # If the cronista failed, leave it so the same delta is retried next run.
@@ -382,9 +387,27 @@ Per your policy: durable lessons/facts only, conservative, never the journal nor
     # another session's one retry attempt inside it burned the attempt on
     # conditions that had nothing to do with that delta. The sweep used to sit
     # ABOVE the `c_rc != 0` gate that skips distillation for exactly that reason.
+    #
+    # The sweep also reclaims BARE `*.md` deltas, not just `*.md.retry`. A delta is
+    # only renamed to `.retry` when the DISTILLER fails; a run killed before that —
+    # shutdown, OOM, SIGKILL mid-cronista — leaves a plain `.md` that this sweep
+    # never listed, and SessionEnd is the last trigger a closed session will ever
+    # fire, so nobody came back for it. Measured on this install: 7 stranded deltas
+    # totalling 232,927 B of conversation that reached no journal, one of them the
+    # only surviving copy of its session (its transcript .jsonl is gone).
+    #
+    # The 20-minute floor is what makes claiming one safe: a LIVE delta belongs to a
+    # run still inside CRONISTA_TIMEOUT (420s) + DISTILLER_TIMEOUT (480s) = 900s, so
+    # anything older than 1200s has no owner left alive. `.retry` files keep
+    # priority — they already burned an attempt and are the older debt.
     pending=""
     if (( c_rc == 0 )); then
         candidate=$(ls -1tr "$DELTA_DIR"/*.md.retry 2>/dev/null | head -1)
+        if [[ -z "$candidate" ]]; then
+            candidate=$(find "$DELTA_DIR" -maxdepth 1 -type f -name '*.md' -mmin +20 \
+                          -printf '%T@ %p\n' 2>/dev/null | sort -n | head -1 | cut -d' ' -f2-)
+            [[ -n "$candidate" ]] && log "SWEEP stranded delta $(basename "$candidate") (no .retry marker — its run died before distillation)"
+        fi
         # CLAIM IT ATOMICALLY. The retry queue is global state, but the lock around
         # this block is per SESSION, so two sessions closing at once both list the
         # same file and both distil it — duplicate memories from one delta, in
@@ -400,7 +423,13 @@ Per your policy: durable lessons/facts only, conservative, never the journal nor
         fi
     fi
     if [[ -n "$pending" && -f "$pending" ]]; then
-        r_sid=$(basename "$pending"); r_sid="${r_sid%.md.retry.claimed.$$}"
+        # Strip the claim suffix, then whichever delta suffix it carried: a swept
+        # `.retry` and a swept bare `.md` both have to yield the bare session id,
+        # because it is what stamps originSessionId on every memory distilled here.
+        r_sid=$(basename "$pending")
+        r_sid="${r_sid%.claimed.$$}"
+        r_sid="${r_sid%.md.retry}"
+        r_sid="${r_sid%.md}"
         # Rebuild the scope from the cwd of the session that PRODUCED this delta,
         # not from ours. Falls back to the global store when the sidecar is absent
         # (a delta stranded by an older version), which is the safe direction: a
@@ -468,7 +497,7 @@ $r_digest
         node "$SCRIPT_DIR/../agents-sdk/destiller.mjs" 2>>"$LOG")
     d_rc=$?
     d_res=$(printf '%s' "$d_out" | jq -r '.result // empty' 2>/dev/null | head -c 300)
-    log "DESTILADOR rc=$d_rc result=$d_res"
+    log "DESTILADOR rc=$d_rc session=$session_id result=$d_res"
 
     # The watermark advanced on the cronista's success above — the journal is the
     # primary capture and re-chronicling would duplicate entries. That meant a

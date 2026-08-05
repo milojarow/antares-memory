@@ -33,6 +33,24 @@ SOCKET_PATH = os.path.join(_runtime, "memory-search.sock")
 _model = None
 _model_lock = threading.Lock()
 
+# Concurrency cap. The server is threaded with no bound, and queries do not
+# degrade gracefully when they compete: every thread runs its own full scan of
+# the chunk table and the GIL serialises the Python-level scoring loop anyway,
+# so they interleave instead of overlapping and each one also evicts the others'
+# page cache. Measured: N=1 184ms, N=2 629ms, N=4 2,820ms, N=8 7,533ms with
+# majflt 16-26 (no paging involved). Serialising N=8 cleanly would cost
+# 8 x 184 = 1,472ms, so unbounded competition is 5.1x more expensive than a
+# queue. Meanwhile the caller's budget is 4s: under load the queries did not
+# merely slow down, they were killed, and 115 of 2,380 prompts (4.83%) reached
+# the model with no memories at all.
+#
+# Queueing is strictly better than thrashing here. 2 admits the pair that a
+# normal prompt produces (global + project scope share one call, but two Claude
+# sessions closing together do not) while keeping the tail inside the budget.
+_query_sem = threading.BoundedSemaphore(
+    int(os.environ.get("ANTARES_MAX_CONCURRENT_QUERIES", "2"))
+)
+
 
 def log(msg):
     print(f"[antares-memory-daemon] {msg}", file=sys.stderr, flush=True)
@@ -77,8 +95,8 @@ def open_db_readonly(db_path):
     return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
 
 
-def do_search(query, top_k=5, threshold=0.35, types="all",
-              vector_w=0.7, keyword_w=0.3, cwd=None, scope="all"):
+def _do_search_admitted(query, top_k=5, threshold=0.35, types="all",
+                        vector_w=0.7, keyword_w=0.3, cwd=None, scope="all"):
     t0 = time.time()
 
     db_paths = _mem_search.get_db_paths(scope, cwd)
@@ -180,9 +198,19 @@ def do_search(query, top_k=5, threshold=0.35, types="all",
     # guessing produced two wrong hypotheses before the right one.
     slow_ms = int(os.environ.get("ANTARES_SLOW_QUERY_MS", "1000"))
     if total_ms >= slow_ms:
-        cause = ("paging the model back in from swap" if mf > 50
-                 else "encode" if encode_ms > db_ms
-                 else "db search")
+        # Phases FIRST, major faults only as a tiebreak. Testing `mf > 50` before
+        # comparing phases mislabelled 127 of 141 slow queries as swap paging, and
+        # 125 of those 127 had db_ms > encode_ms: 81.7% of the time blamed on
+        # paging was spent in the DB. The counter does not predict either phase
+        # (r(majflt, db_ms) = -0.27, r(majflt, encode_ms) = +0.036), and it cannot:
+        # PRAGMA mmap_size = 0, so SQLite reads through pread() and the db phase
+        # generates no major faults at all. At ~26 us/fault even the worst burst
+        # observed (5,283) is ~137 ms against 1,000-8,000 ms of db time.
+        # This line is read by whoever optimises next. It pointed the last audit at
+        # the wrong subsystem for an hour.
+        cause = ("db search" if db_ms > encode_ms
+                 else "paging the model back in from swap" if mf > 50
+                 else "encode")
         log(f"SLOW query {total_ms}ms (encode={encode_ms}ms db={db_ms}ms "
             f"majflt={mf} chars={len(query)}) — dominant cost: {cause}")
 
@@ -199,7 +227,38 @@ def do_search(query, top_k=5, threshold=0.35, types="all",
     }
 
 
+def do_search(*args, **kwargs):
+    """Admission gate in front of the real search.
+
+    A wrapper rather than a `with` block inside the function body, so the
+    hundreds of lines below keep their indentation and their blame history.
+
+    Queue time is logged separately from work time on purpose: the inner t0
+    starts after admission, so `timing_ms` keeps meaning "what the search cost"
+    and never silently absorbs the wait. The caller's budget covers both, so a
+    wait that grows is the thing to watch.
+    """
+    t_wait = time.time()
+    with _query_sem:
+        waited_ms = int((time.time() - t_wait) * 1000)
+        if waited_ms >= 200:
+            log(f"QUEUED {waited_ms}ms waiting for a slot "
+                f"(cap={_query_sem._initial_value})")
+        resp = _do_search_admitted(*args, **kwargs)
+        if isinstance(resp, dict) and waited_ms:
+            resp["queued_ms"] = waited_ms
+        return resp
+
+
 class Handler(socketserver.StreamRequestHandler):
+    # A client that connects and never writes used to hold a thread forever:
+    # rfile.readline() blocks with no deadline. Verified live — one idle
+    # connection took the thread count from 28 to 29 and kept it there. With
+    # TasksMax=64 that is ~36 stuck connections away from a daemon that answers
+    # nothing while the PROCESS stays healthy, which is the worst failure shape
+    # available: Restart=always never fires, because nothing died.
+    timeout = 10
+
     def handle(self):
         try:
             line = self.rfile.readline()
@@ -233,6 +292,13 @@ class Handler(socketserver.StreamRequestHandler):
                 return
             else:
                 resp = {"ok": False, "error": "unknown_op", "op": op}
+        except TimeoutError:
+            # `timeout` above fired: the client connected and never sent a line.
+            # socket.timeout has been an alias of TimeoutError since 3.10. Release
+            # the thread silently — there is nobody on the other end to answer, and
+            # letting this fall through to the generic handler below would log an
+            # error and then try to write into a socket that is going away.
+            return
         except json.JSONDecodeError as e:
             resp = {"ok": False, "error": "json_decode", "detail": str(e)}
         except Exception as e:

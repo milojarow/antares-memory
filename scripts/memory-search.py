@@ -149,17 +149,32 @@ def search_v2(conn, query_embedding, query_text, type_filter, top_n,
         type_clause = "WHERE file_type = ?"
         params.append(type_filter)
 
+    # Scan the ranking columns only, and score with ONE matmul.
+    #
+    # The old form pulled `content` and `title` for all 17,505 rows on every query
+    # — ~4.9 MB of text to use five rows of — and then ran a Python-level np.dot
+    # per row. Two costs, one of them shared: the per-row loop holds the GIL, so
+    # concurrent queries interleaved instead of overlapping and N=8 took 7.5s each
+    # (5.1x worse than serialising). A single `M @ q` releases the GIL and lets
+    # BLAS do the whole corpus at once.
+    #
+    # This is exact, not an approximation: content/title/file_type are hydrated
+    # below for the winners only, and nothing before that point reads them —
+    # dedup keys on file_path, which is still scanned.
     rows = conn.execute(
-        f"SELECT id, file_path, chunk_index, content, embedding, title, file_type "
+        f"SELECT id, file_path, chunk_index, embedding "
         f"FROM memory_chunks {type_clause}",
         params,
     ).fetchall()
 
     chunk_data = {}
-    for chunk_id, file_path, chunk_idx, content, emb_blob, title, file_type in rows:
-        stored = np.frombuffer(emb_blob, dtype=np.float32)
-        similarity = max(0.0, min(1.0, float(np.dot(query_embedding, stored))))
-        chunk_data[chunk_id] = (similarity, file_path, chunk_idx, content, title, file_type)
+    if rows:
+        dim = len(rows[0][3]) // 4  # float32 blobs, width from the data itself
+        mat = np.frombuffer(b"".join(r[3] for r in rows),
+                            dtype=np.float32).reshape(len(rows), dim)
+        sims = np.clip(mat @ np.asarray(query_embedding, dtype=np.float32), 0.0, 1.0)
+        for (chunk_id, file_path, chunk_idx, _emb), similarity in zip(rows, sims):
+            chunk_data[chunk_id] = (float(similarity), file_path, chunk_idx)
 
     ensure_fts_table(conn, 2)
     bm25_scores = {}
@@ -207,7 +222,7 @@ def search_v2(conn, query_embedding, query_text, type_filter, top_n,
         if chunk_id not in chunk_data:
             continue
 
-        v_score, file_path, chunk_idx, content, title, file_type = chunk_data[chunk_id]
+        v_score, file_path, chunk_idx = chunk_data[chunk_id]
         k_score = bm25_scores.get(chunk_id, 0.0)
         final = vector_w * v_score + keyword_w * k_score
 
@@ -215,15 +230,36 @@ def search_v2(conn, query_embedding, query_text, type_filter, top_n,
             continue
 
         if file_path not in best_per_file or final > best_per_file[file_path][0]:
-            snippet = content[:300].replace("\n", " ").strip()
-            if len(content) > 300:
-                snippet += "..."
             best_per_file[file_path] = (
-                final, v_score, k_score, file_path, title, snippet, file_type, chunk_idx
+                final, v_score, k_score, file_path, chunk_id, chunk_idx
             )
 
-    results = sorted(best_per_file.values(), reverse=True)
-    return results[:top_n]
+    # Hydrate text for the winners only. Sorting happens after, on the same key
+    # order as before (final, v_score, k_score, file_path, ...), and file_path is
+    # unique per entry, so no tie can reach the columns that changed shape.
+    winners = sorted(best_per_file.values(), reverse=True)[:top_n]
+    if not winners:
+        return []
+
+    ids = [w[4] for w in winners]
+    text_by_id = {
+        cid: (content, title, file_type)
+        for cid, content, title, file_type in conn.execute(
+            "SELECT id, content, title, file_type FROM memory_chunks "
+            f"WHERE id IN ({','.join('?' * len(ids))})", ids
+        )
+    }
+
+    results = []
+    for final, v_score, k_score, file_path, chunk_id, chunk_idx in winners:
+        content, title, file_type = text_by_id.get(chunk_id, ("", "", ""))
+        snippet = content[:300].replace("\n", " ").strip()
+        if len(content) > 300:
+            snippet += "..."
+        results.append(
+            (final, v_score, k_score, file_path, title, snippet, file_type, chunk_idx)
+        )
+    return results
 
 
 def search_v1(conn, query_embedding, query_text, type_filter, top_n,
@@ -370,7 +406,14 @@ def main():
 
     results = []
     for scope_name, db_path in db_paths:
-        conn = sqlite3.connect(db_path)
+        # Read-only, like the daemon opens it. A search has no business writing,
+        # and this path could: ensure_fts_table() is called from inside both
+        # search_v1 and search_v2, and its creation branch runs CREATE VIRTUAL
+        # TABLE + INSERT..SELECT + commit. Inert while the table exists, but it is
+        # a write that can take the lock against a running memory-index.py. The
+        # function already degrades to vector-only on OperationalError, which is
+        # exactly what a read-only handle raises.
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         version = detect_schema_version(conn)
 
         if version == 2:

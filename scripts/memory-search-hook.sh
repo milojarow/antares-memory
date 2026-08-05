@@ -61,9 +61,16 @@ resp=$(printf '%s\n' "$req" | timeout "$QUERY_TIMEOUT" socat -t "$QUERY_TIMEOUT"
   # Record how long it actually waited: a timeout with no duration cannot tell a
   # slow daemon from a dead socket, and that is the difference between tuning this
   # number and restarting the service.
+  waited_ms=$(( ($(date +%s%N) - q_start) / 1000000 ))
   printf '%s TIMEOUT after=%sms budget=%ss prompt=%q\n' \
-    "$(date -Iseconds)" "$(( ($(date +%s%N) - q_start) / 1000000 ))" "$QUERY_TIMEOUT" "${prompt:0:80}" >>"$LOG" 2>/dev/null || true
-  echo '{}'
+    "$(date -Iseconds)" "$waited_ms" "$QUERY_TIMEOUT" "${prompt:0:80}" >>"$LOG" 2>/dev/null || true
+  # Say so out loud instead of emitting a bare '{}'. A silent timeout is
+  # indistinguishable from "nothing relevant was found", so a turn that ran
+  # WITHOUT memory looks exactly like a turn that had none to load — and 115 of
+  # 2,380 prompts (4.83%) took that path unannounced. One line is enough to stop
+  # a wrong conclusion being drawn from a store that was never consulted.
+  jq -n --arg m "[antares-memory] search exceeded ${waited_ms}ms (budget ${QUERY_TIMEOUT}s) — THIS TURN CARRIES NO MEMORIES. Treat the absence as unknown, not as 'nothing recorded': search by hand with \`memory-search \"<query>\"\` before concluding anything about prior work." \
+    '{hookSpecificOutput:{hookEventName:"UserPromptSubmit",additionalContext:$m}}' 2>/dev/null || echo '{}'
   exit 0
 }
 
