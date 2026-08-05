@@ -29,17 +29,35 @@ file_path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty' 2>/dev
 
 [[ -z "$file_path" ]] && exit 0
 
-# Match: $ANTARES_PROJECTS_DIR/<slug>/memory/...
-# That means the parent of the file is somewhere under a slug's memory/ dir.
+# Match either store:
+#   - $ANTARES_PROJECTS_DIR/<slug>/memory/...  (a project store)
+#   - $(antares_home_memory_dir)/...           (the global store)
+#
+# The home branch is NOT redundant. When the global store is overridden — and on
+# this install it is, to ~/.claude/memory-jarvis — it does not live under
+# $ANTARES_PROJECTS_DIR at all, so the project pattern never matched it and this
+# hook exited 0 for every global memory ever written. Measured: 0 triggers naming
+# memory-jarvis since 2026-07-25 against 33 project triggers in the same window,
+# while the `--scope home` branch below sat unreachable as dead code. The effect
+# was exactly what this hook's docstring promises to prevent: a memory written
+# mid-session stayed invisible to the UserPromptSubmit search until the NEXT
+# session's SessionStart reindex picked it up.
+home_dir="$(antares_home_memory_dir)"
 case "$file_path" in
   "$ANTARES_PROJECTS_DIR"/*/memory/*) ;;
+  "$home_dir"/*) ;;
   *) exit 0 ;;
 esac
 
 # Extract slug → reconstruct the original cwd to pass to the indexer.
 # Path structure: $ANTARES_PROJECTS_DIR/<slug>/memory/<rest>
-rest="${file_path#"$ANTARES_PROJECTS_DIR"/}"   # <slug>/memory/<rest>
-slug="${rest%%/memory/*}"
+# A file in the global store has no slug; it is named explicitly for the log.
+if [[ "$file_path" == "$home_dir"/* ]]; then
+    slug="(home)"
+else
+    rest="${file_path#"$ANTARES_PROJECTS_DIR"/}"   # <slug>/memory/<rest>
+    slug="${rest%%/memory/*}"
+fi
 
 # NO reverse slugify. There used to be one here ('-' back to '/'), and it cannot
 # be made correct: slugify collapses EVERY non-alphanumeric character to '-', so a
@@ -69,8 +87,12 @@ esac
 # exited 0 having indexed zero files. A component that reports success without
 # working is worse than one that fails, and this one hid behind the SessionStart
 # reindex until that one broke too.
-target_dir="$ANTARES_PROJECTS_DIR/$slug/memory"
-if [[ "$target_dir" == "$(antares_home_memory_dir)" ]]; then
+if [[ "$slug" == "(home)" ]]; then
+    target_dir="$home_dir"
+else
+    target_dir="$ANTARES_PROJECTS_DIR/$slug/memory"
+fi
+if [[ "$target_dir" == "$home_dir" ]]; then
     scope_args=(--scope home)
 else
     scope_args=(--memory-dir "$target_dir")

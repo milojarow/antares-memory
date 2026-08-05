@@ -14,15 +14,24 @@ override it; the rest use the HOME slug. Check in this order and use the first t
 
 1. `~/.claude/memory-jarvis/` — the override, when present.
 2. `~/.claude/projects/<HOME-slug>/memory/` — the default, where `<HOME-slug>` is
-   `$HOME` with `/` replaced by `-` (compute it: `echo "$HOME" | tr / -`).
+   `$HOME` with **EVERY non-alphanumeric character** replaced by `-` — not just `/`
+   (compute it: `echo "$HOME" | sed 's/[^A-Za-z0-9]/-/g'`).
    **Never assume a specific username.**
+
+   The `/`-only rule is WRONG and silently unreachable for any path containing a
+   dot, an underscore or a hyphen: `$HOME/.claude` slugs to
+   `<home-slug>--claude` (two hyphens — the dot becomes one too), never
+   `<home-slug>-.claude`. 14 of 67 slug dirs on one install contain `--`, so the
+   wrong rule makes 21% of the stores invisible. The canonical rule is
+   `re.sub(r"[^A-Za-z0-9]", "-", path)` in `scripts/lib/common.py`.
 
 Getting this wrong is not a near-miss, it is a confident lie: on one install the
 override held 549 memories while the HOME slug held 26, so the fallback answered
 "no record" about things that were plainly recorded.
 
 - **Project memories**: if the parent gives a cwd, also read
-  `~/.claude/projects/<slug-of-that-cwd>/memory/*.md`. Memories are two-tier by
+  `~/.claude/projects/<slug-of-that-cwd>/memory/*.md`, slugging that cwd with the
+  SAME every-non-alphanumeric rule above (`sed 's/[^A-Za-z0-9]/-/g'`). Memories are two-tier by
   design — the global store holds what is cross-cutting, the project store holds
   what is only useful in that cwd. A question asked from inside a project needs both.
 - **Session journals**: `<global-store>/journal/session-<id>.md` — one per session,
